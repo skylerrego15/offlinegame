@@ -20,7 +20,7 @@
 
   <div id="hud">
     <div class="hud-row">
-      <div class="pill money"><span class="coin">⛁</span><div><b id="moneyV">$0</b><small id="incomeV"></small></div></div>
+      <div class="pill money" id="moneyPill"><span class="coin">⛁</span><div><b id="moneyV">$0</b><small id="incomeV"></small></div></div>
       <div class="pill dread" id="dreadPill"><span class="eye">◉</span><div class="dbar"><i id="dreadBar"></i></div><b id="dreadV">0</b></div>
       <div class="sigil" id="sigilV"></div>
     </div>
@@ -50,8 +50,9 @@
       <button data-panel="crew"><i>☠</i>Crew</button>
       <button data-panel="ship"><i>⚒</i>Ship</button>
       <button data-panel="aquarium"><i>◈</i>Tanks</button>
+      <button data-panel="eggs"><i>⬮</i>Eggs<span class="nbadge hidden" id="eggBadge"></span></button>
       <button data-panel="codex"><i>✥</i>Bestiary</button>
-      <button data-panel="contracts"><i>✎</i>Jobs</button>
+      <button data-panel="contracts"><i>✎</i>Jobs<span class="nbadge hidden" id="jobBadge"></span></button>
       <button data-panel="menu"><i>☰</i>Log</button>
     </nav>
   </div>
@@ -73,6 +74,16 @@
     <div class="cfoot"><span id="cardCount"></span><span id="cardStyle"></span><button id="cardRest" class="link">sell rest</button></div>
   </div>
 
+  <div id="haul" class="hidden">
+    <div class="haul-head"><div><small>THE HAUL</small><h2 id="haulTitle"></h2><em id="haulSub"></em></div><button id="haulClose" title="store all">STORE &amp; CLOSE</button></div>
+    <div id="haulBody"></div>
+    <div class="haul-foot">
+      <button class="hb hatch" data-h="hatchall">HATCH ALL</button>
+      <button class="hb sell" data-h="sellall">SELL ALL<b id="haulSellAll"></b></button>
+      <button class="hb store" data-h="storeall">STORE ALL</button>
+    </div>
+  </div>
+
   <button id="visitBtn" class="hidden">STRIKE IT!</button>
 
   <div id="sheet" class="hidden">
@@ -80,6 +91,7 @@
     <div id="sheetBody"></div>
   </div>
   <div id="modal" class="hidden"></div>
+  <div id="fly"></div>
 
   <div id="loading">
     <div class="title"><small>a lovecraftian deep-sea egg harvest</small><h1>DROWNED<br>CLUTCH</h1></div>

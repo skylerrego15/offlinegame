@@ -1,12 +1,12 @@
 import { R } from './rt.js';
 import {
-  S, stats, save, addMoney, nextUid, contractEvent, upgradeCost, crewCost, roomCost, crewTotal,
+  S, stats, save, addMoney, nextUid, contractEvent, eggValue, upgradeCost, crewCost, roomCost, crewTotal,
   incomePerSec, sellValue, omenActive, ensureContracts, makeContract,
 } from './state.js';
 import { MAX_DEPTH, CREATURE_BY_ID, EGGS, HATCH_ODDS, BY_RARITY, MUTATIONS, RARITIES, UPG_BY_ID, CREW_BY_ID, zoneAt, ZONES, OMENS, OMEN_BY_ID } from './data.js';
 import { newField, ensureChunks, updateField, eggSize, worldW, tentacleTip } from './ocean.js';
 import { layoutShip, cannonTip } from './ship.js';
-import { burst, ring, spark, floatText, shake, flash, comboFX, stop } from './fx.js';
+import { burst, ring, spark, floatText, shake, flash, comboFX, stop, clearFx } from './fx.js';
 import { sfxPlay, vibrate, setAmbience } from './audio.js';
 import { clamp, rand, pick, weighted, gauss, fmt, money, meters, lerp } from './util.js';
 import { UI } from './ui-bridge.js';
@@ -54,23 +54,112 @@ export function sellInst(inst) {
   sfxPlay('coin');
   return v;
 }
+// Kept creatures go into a free tank, otherwise into storage (no limit).
 export function keepInst(inst) {
   const st = stats();
-  if (S.aquarium.length >= st.aquaSlots) return false;
-  S.aquarium.push(inst);
-  S.aquarium.sort((a, b) => b.value - a.value);
-  return true;
+  if (S.aquarium.length < st.aquaSlots) {
+    S.aquarium.push(inst);
+    S.aquarium.sort((a, b) => b.value - a.value);
+    return 'tank';
+  }
+  S.bag.push(inst);
+  S.bag.sort((a, b) => b.value - a.value);
+  return 'bag';
 }
 export function weakestFish() {
   let w = null;
   for (const f of S.aquarium) if (!w || f.value < w.value) w = f;
   return w;
 }
-export function sellAquarium(uid) {
-  const i = S.aquarium.findIndex((f) => f.uid === uid);
-  if (i < 0) return 0;
-  const [f] = S.aquarium.splice(i, 1);
+function findFish(uid) {
+  let i = S.aquarium.findIndex((f) => f.uid === uid);
+  if (i >= 0) return [S.aquarium, i];
+  i = S.bag.findIndex((f) => f.uid === uid);
+  if (i >= 0) return [S.bag, i];
+  return [null, -1];
+}
+export function sellFish(uid) {
+  const [arr, i] = findFish(uid);
+  if (!arr) return 0;
+  const [f] = arr.splice(i, 1);
   return sellInst(f);
+}
+export const sellAquarium = sellFish;
+export function fishToBag(uid) {
+  const i = S.aquarium.findIndex((f) => f.uid === uid);
+  if (i < 0) return false;
+  S.bag.push(...S.aquarium.splice(i, 1));
+  S.bag.sort((a, b) => b.value - a.value);
+  sfxPlay('ui');
+  return true;
+}
+// put a stored creature in a tank; if the tanks are full it swaps with the weakest
+export function fishToTank(uid) {
+  const i = S.bag.findIndex((f) => f.uid === uid);
+  if (i < 0) return false;
+  const st = stats();
+  const [f] = S.bag.splice(i, 1);
+  if (S.aquarium.length >= st.aquaSlots) {
+    const w = weakestFish();
+    if (w) { S.aquarium.splice(S.aquarium.indexOf(w), 1); S.bag.push(w); }
+  }
+  S.aquarium.push(f);
+  S.aquarium.sort((a, b) => b.value - a.value);
+  S.bag.sort((a, b) => b.value - a.value);
+  sfxPlay('buy');
+  return true;
+}
+// fill every tank with the highest earners you own
+export function equipBest() {
+  const st = stats();
+  const all = S.aquarium.concat(S.bag).sort((a, b) => b.value - a.value);
+  const before = S.aquarium.map((f) => f.uid).join();
+  S.aquarium = all.slice(0, st.aquaSlots);
+  S.bag = all.slice(st.aquaSlots);
+  return before !== S.aquarium.map((f) => f.uid).join();
+}
+export function sellAllStored() {
+  let t = 0;
+  for (const f of S.bag) t += sellValue(f);
+  if (!S.bag.length) return 0;
+  addMoney(t);
+  contractEvent('sell', t);
+  S.bag = [];
+  sfxPlay('coin');
+  return t;
+}
+
+// ---------------------------------------------------------------------------
+// Eggs: haul + inventory
+// ---------------------------------------------------------------------------
+export function sellEggs(inv, tier, n) {
+  const have = inv[tier] || 0;
+  n = Math.min(n, have);
+  if (n <= 0) return 0;
+  const v = eggValue(tier) * n;
+  inv[tier] = have - n;
+  if (!inv[tier]) delete inv[tier];
+  addMoney(v);
+  contractEvent('sell', v);
+  sfxPlay('coin');
+  return v;
+}
+export function storeEggs(inv, tier, n) {
+  const have = inv[tier] || 0;
+  n = Math.min(n, have);
+  if (n <= 0) return 0;
+  inv[tier] = have - n;
+  if (!inv[tier]) delete inv[tier];
+  S.eggInv[tier] = (S.eggInv[tier] || 0) + n;
+  sfxPlay('pickup');
+  return n;
+}
+export function takeEggs(inv, tier, n) {
+  const have = inv[tier] || 0;
+  n = Math.min(n, have);
+  inv[tier] = have - n;
+  if (!inv[tier]) delete inv[tier];
+  return Array(n).fill(+tier);
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +247,8 @@ function hpScreen() {
 function stowEgg(tier, wx, wy) {
   const hp = R.hp;
   hp.eggs.push(tier);
+  hp.squash = 1;
+  UI.eggFly(wx * R.PPM, wy * R.PPM - R.camY, tier);
   floatText(wx * R.PPM, wy * R.PPM - 26, EGGS[tier - 1].name, EGGS[tier - 1].color, 15);
 }
 
@@ -236,6 +327,7 @@ export function updateDive(dt) {
     return;
   }
   hp.slowT -= dt; hp.magnetT -= dt;
+  hp.squash = (hp.squash || 0) * Math.exp(-dt * 7);
   const ww = worldW();
   // Direct steering: the harpoon chases your finger's x position. Constant dive speed.
   const v = st.speed * (hp.slowT > 0 ? 0.45 : 1);
@@ -446,13 +538,15 @@ export function finishHaul() {
     return;
   }
   UI.toast(`Hauled ${eggs.length} egg${eggs.length > 1 ? 's' : ''}` + (extra.length ? ' — ' + extra.join(', ') : ''), '#e8dcc0');
-  R.haul = eggs;
-  R.mode = 'reveal';
-  UI.setMode('reveal');
-  UI.startHaul();
+  R.haulEggs = {};
+  for (const t of eggs) R.haulEggs[t] = (R.haulEggs[t] || 0) + 1;
+  R.mode = 'haul';
+  UI.setMode('haul');
+  UI.showHaul(true);
 }
 
 export function toShip() {
+  clearFx();
   R.mode = 'ship';
   R.hp = null;
   resetField();

@@ -2,7 +2,7 @@ import { R } from './rt.js';
 import { UI } from './ui-bridge.js';
 import {
   S, stats, save, wipe, load, upgradeCost, crewCost, roomCost, crewTotal, roomCount, incomePerSec, fishIncome, sellValue,
-  codexMutCount, codexSpecies, omenActive, sigilsAvailable, canOffer, doOffering, ensureContracts,
+  codexMutCount, codexSpecies, omenActive, sigilsAvailable, canOffer, doOffering, ensureContracts, eggValue, eggTotal,
 } from './state.js';
 import { UPGRADES, CREW, ROOMS, CREATURES, CREATURE_BY_ID, RARITIES, MUTATIONS, MUT_BY_ID, EGGS, ZONES, OMEN_BY_ID, zoneAt, AQUA_RATE } from './data.js';
 import { creatureURL, eggURL } from './assets.js';
@@ -13,10 +13,11 @@ import { money, fmt, meters, clamp } from './util.js';
 import {
   hatch, sellInst, keepInst, weakestFish, sellAquarium, buyUpgrade, hireCrew, buildRoom, startReel, toShip,
   claimContract, rerollContract, rerollCost, tapVisit, reelSafe, fireHarpoon, COMBO_WINDOW, buyCage,
+  sellFish, fishToBag, fishToTank, equipBest, sellAllStored, sellEggs, storeEggs, takeEggs,
 } from './game.js';
 import { startReveal, skipReveal, endReveal, RV, REVEALS } from './reveal.js';
 import { layoutShip } from './ship.js';
-import { sfxPlay, setSfx, setMusic, initAudio } from './audio.js';
+import { sfxPlay, setSfx, setMusic, initAudio, vibrate } from './audio.js';
 import { floatText, burst } from './fx.js';
 
 const $ = (s) => document.querySelector(s);
@@ -30,8 +31,20 @@ export function initUI() {
     'shipHud', 'fireBtn', 'nav', 'banner', 'bannerSmall', 'bannerBig', 'bannerLore', 'toasts', 'tip',
     'card', 'cardName', 'cardRar', 'cardTags', 'cardStats', 'cardSell', 'cardKeep', 'cardRest', 'cardCount', 'cardBadge', 'cardStyle',
     'visitBtn', 'sheet', 'sheetTitle', 'sheetBody', 'sheetClose', 'modal',
+    'haul', 'haulTitle', 'haulSub', 'haulBody', 'haulClose', 'haulSellAll', 'fly', 'app', 'eggBadge', 'jobBadge', 'moneyPill',
   ]) E[id] = document.getElementById(id);
-  Object.assign(UI, { toast, tip, setMode, zoneBanner, startHaul, omen, visit, refresh: refreshPanel });
+  Object.assign(UI, { toast, tip, setMode, zoneBanner, startHaul: () => {}, omen, visit, refresh: refreshPanel, showHaul, eggFly });
+
+  // haul screen
+  E.haul.addEventListener('click', onHaulClick);
+  E.haulClose.addEventListener('click', () => haulAction('storeall', null, E.haulClose));
+  // tactile feedback on every button
+  document.addEventListener('pointerdown', (e) => {
+    const b = e.target.closest('button');
+    if (!b || b.disabled) return;
+    if (S.settings.haptics) vibrate(8);
+    b.classList.remove('pressed'); void b.offsetWidth; b.classList.add('pressed');
+  }, true);
 
   // nav
   E.nav.addEventListener('click', (e) => {
@@ -100,11 +113,20 @@ export function initUI() {
 // ---------------------------------------------------------------------------
 // HUD
 // ---------------------------------------------------------------------------
-let hudT = 0;
+let hudT = 0, shownMoney = null, prevMoney = null, pendGain = 0, gainT = 0, lastEggs = -1;
 export function updateUI(dt) {
   hudT += dt;
   const st = stats();
-  E.moneyV.textContent = money(S.money);
+  if (shownMoney === null) { shownMoney = S.money; prevMoney = S.money; }
+  const inc0 = incomePerSec(st);
+  const d = S.money - prevMoney;
+  prevMoney = S.money;
+  if (d > Math.max(1, inc0 * 0.6)) pendGain += d;
+  gainT += dt;
+  if (pendGain > 0 && gainT > 0.18) { popGain(pendGain); pendGain = 0; gainT = 0; }
+  shownMoney += (S.money - shownMoney) * (1 - Math.exp(-dt * 10));
+  if (Math.abs(S.money - shownMoney) < 0.5 || S.money < shownMoney) shownMoney = S.money;
+  E.moneyV.textContent = money(shownMoney);
   if (hudT > 0.25) {
     hudT = 0;
     const inc = incomePerSec(st);
@@ -121,6 +143,14 @@ export function updateUI(dt) {
       E.omenChip.innerHTML = `<b style="color:${o.color}">${o.name}</b> · ${o.desc} · ${Math.ceil((S.omenEnd - Date.now()) / 1000)}s`;
     } else E.omenChip.classList.add('hidden');
     if (R.panel) updateAfford();
+    const eggs = eggTotal();
+    E.eggBadge.textContent = eggs ? fmt(eggs) : '';
+    E.eggBadge.classList.toggle('hidden', !eggs);
+    if (lastEggs >= 0 && eggs > lastEggs) bump(E.eggBadge);
+    lastEggs = eggs;
+    const claim = S.contracts.filter((c) => c.progress >= c.target).length;
+    E.jobBadge.textContent = claim || '';
+    E.jobBadge.classList.toggle('hidden', !claim);
   }
   const hp = R.hp;
   if ((R.mode === 'dive' || R.mode === 'reel') && hp) {
@@ -168,7 +198,10 @@ function setMode(m) {
   E.reelHud.classList.toggle('hidden', m !== 'reel');
   E.reelBtn.classList.toggle('hidden', m !== 'dive');
   E.eggSlots.classList.toggle('hidden', m === 'reel');
-  E.shipHud.classList.toggle('hidden', m !== 'ship');
+  E.shipHud.classList.toggle('hidden', m !== 'ship' && m !== 'haul');
+  E.fireBtn.classList.toggle('hidden', m !== 'ship');
+  E.nav.classList.toggle('locked', m === 'haul');
+  E.haul.classList.toggle('hidden', m !== 'haul');
   E.card.classList.add('hidden');
   if (m !== 'ship') closePanel();
   if (m === 'ship' && S.tut === 0) { tip('Hold the harpoon button, slide your finger to aim, release to fire into the deep.'); S.tut = 1; }
@@ -222,10 +255,16 @@ function visit(on) {
 // ---------------------------------------------------------------------------
 // Haul reveal flow
 // ---------------------------------------------------------------------------
-let queue = [], qi = 0, cur = null;
-function startHaul() {
+let queue = [], qi = 0, cur = null, hatchLuck = 0, hatchBack = null;
+// hatch a list of egg tiers one after another, then go back to where we came from
+function hatchQueue(list, luck, back) {
+  if (!list.length) return;
+  closePanel();
   try { snapshot(document.getElementById('cv')); } catch (e) {}
-  queue = R.haul.slice(); qi = 0;
+  queue = list.slice().sort((a, b) => a - b); qi = 0;
+  hatchLuck = luck; hatchBack = back;
+  R.mode = 'reveal';
+  setMode('reveal');
   nextEgg();
 }
 function nextEgg() {
@@ -234,12 +273,19 @@ function nextEgg() {
     endReveal();
     cur = null;
     save();
-    toShip();
-    if (S.tut === 3) { tip('Keep creatures in your aquarium for money every second, or sell for cash now. Upgrades are in the bottom bar.'); S.tut = 4; }
+    if (hatchBack === 'haul' && eggTotal(R.haulEggs || {}) > 0) {
+      R.mode = 'haul';
+      setMode('haul');
+      showHaul(false);
+    } else {
+      toShip();
+      if (hatchBack === 'eggs' && eggTotal() > 0) openPanel('eggs');
+    }
+    if (S.tut === 3) { tip('Keep creatures for money every second, or sell for cash now. Eggs you store wait in the Eggs tab.'); S.tut = 4; }
     return;
   }
   const tier = queue[qi++];
-  const item = hatch(tier, R.haulLuck);
+  const item = hatch(tier, hatchLuck);
   cur = item;
   const r = item.def.r;
   const special = item.inst.mut || item.first || item.inst.colossal;
@@ -277,15 +323,12 @@ function showCard(item) {
   E.cardStats.innerHTML = `<i>${def.lore}</i>`;
   E.cardSell.innerHTML = `SELL<b>${money(sv)}</b>`;
   const full = S.aquarium.length >= st.aquaSlots;
-  const weak = weakestFish();
   E.cardKeep.disabled = false;
-  if (!full) E.cardKeep.innerHTML = `KEEP<b>+${money(inc)}/s</b>`;
-  else if (weak && weak.value < inst.value) E.cardKeep.innerHTML = `SWAP<b>sells ${CREATURE_BY_ID[weak.id].name.split(' ').slice(-1)[0]}</b>`;
-  else { E.cardKeep.innerHTML = 'TANKS FULL<b>build more</b>'; E.cardKeep.disabled = true; }
+  E.cardKeep.innerHTML = full ? `KEEP<b>to storage</b>` : `KEEP<b>tank +${money(inc)}/s</b>`;
   const left = queue.length - qi;
   E.cardCount.textContent = `egg ${qi} of ${queue.length}`;
   E.cardRest.classList.toggle('hidden', left < 1);
-  E.cardRest.textContent = `sell this + ${left} more`;
+  E.cardRest.textContent = `sell this + hatch & sell ${left} more`;
   E.card.classList.remove('hidden');
   E.card.style.setProperty('--rc', RARITIES[r].color);
 }
@@ -295,28 +338,147 @@ function cardAction(a) {
   const item = cur;
   if (a === 'sell') {
     sellInst(item.inst);
+    coinFly(E.cardSell, 6);
   } else if (a === 'keep') {
-    const st = stats();
-    if (S.aquarium.length >= st.aquaSlots) {
-      const w = weakestFish();
-      if (!w || w.value >= item.inst.value) return;
-      sellAquarium(w.uid);
-    }
-    keepInst(item.inst);
+    const where = keepInst(item.inst);
     sfxPlay('buy');
+    flyTo(E.cardKeep, E.nav.querySelector('[data-panel="aquarium"]'), `<img src="${creatureURL(item.inst.id, item.inst.mut)}" class="flyfish">`, 1);
+    if (where === 'bag') toast('Tanks full: sent to storage. Use Equip Best in Tanks.', '#9fd8c9');
   } else if (a === 'rest') {
     let total = sellInst(item.inst);
     let best = null;
     while (qi < queue.length) {
-      const it = hatch(queue[qi++], R.haulLuck);
+      const it = hatch(queue[qi++], hatchLuck);
       if (!best || it.def.r > best.def.r) best = it;
       total += sellInst(it.inst);
     }
+    coinFly(E.cardRest, 10);
     toast(`Sold the rest for ${money(total)}` + (best ? ` (best: ${best.def.name})` : ''), '#ffd34d');
   }
   endReveal();
   cur = null;
   nextEgg();
+}
+
+// ---------------------------------------------------------------------------
+// The haul: decide what to do with every egg you reeled up
+// ---------------------------------------------------------------------------
+function showHaul(fresh) {
+  const inv = R.haulEggs || {};
+  const n = eggTotal(inv);
+  const st = stats();
+  let total = 0;
+  for (const t in inv) total += eggValue(+t, st) * inv[t];
+  E.haulTitle.textContent = `${n} egg${n === 1 ? '' : 's'}`;
+  E.haulSub.innerHTML = R.haulLuck > 0.001 ? `<b style="color:#9dffc8">+${Math.round(R.haulLuck * 100)}% haul luck</b> if you hatch them now` : 'hatch now, sell now, or store them for later';
+  E.haulSellAll.textContent = money(total);
+  const tiers = Object.keys(inv).map(Number).sort((a, b) => b - a);
+  E.haulBody.innerHTML = tiers.map((t, i) => {
+    const eg = EGGS[t - 1], v = eggValue(t, st);
+    return `<div class="hrow ${fresh ? 'enter' : ''}" style="--ec:${eg.color};animation-delay:${i * 70}ms" data-row="${t}">
+      <div class="hegg"><img src="${eggURL(t)}" alt=""><span class="hcount">×${inv[t]}</span></div>
+      <div class="hinfo"><b style="color:${eg.color}">${eg.name}</b><small>sells for ${money(v)} each</small></div>
+      <div class="hbtns"><button class="hb sm hatch" data-h="hatch" data-t="${t}">HATCH</button><button class="hb sm sell" data-h="sell" data-t="${t}">SELL<b>${money(v)}</b></button><button class="hb sm store" data-h="store" data-t="${t}">STORE</button></div>
+    </div>`;
+  }).join('');
+  if (fresh) {
+    tiers.forEach((t, i) => setTimeout(() => sfxPlay('hit', 2 + t), 120 + i * 70));
+    countUp(E.haulSellAll, total);
+  }
+}
+function onHaulClick(e) {
+  const b = e.target.closest('[data-h]');
+  if (!b || b.disabled) return;
+  haulAction(b.dataset.h, b.dataset.t ? +b.dataset.t : null, b);
+}
+function haulAction(act, t, btn) {
+  const inv = R.haulEggs || {};
+  if (act === 'hatch') return hatchQueue(takeEggs(inv, t, 1), R.haulLuck, 'haul');
+  if (act === 'hatchall') {
+    const list = [];
+    for (const k of Object.keys(inv)) list.push(...takeEggs(inv, +k, inv[k]));
+    return hatchQueue(list, R.haulLuck, 'haul');
+  }
+  if (act === 'sell') { sellEggs(inv, t, 1); coinFly(btn, 3); }
+  if (act === 'store') { storeEggs(inv, t, 1); flyTo(btn, E.nav.querySelector('[data-panel="eggs"]'), `<img src="${eggURL(t)}" class="flyegg">`, 1); }
+  if (act === 'sellall') {
+    let v = 0;
+    for (const k of Object.keys(inv)) v += sellEggs(inv, +k, inv[k]);
+    if (v) { coinFly(btn, 12); toast(`Sold the haul for ${money(v)}`, '#ffd34d'); }
+  }
+  if (act === 'storeall') {
+    let n = 0, top = 1;
+    for (const k of Object.keys(inv)) { top = Math.max(top, +k); n += storeEggs(inv, +k, inv[k]); }
+    if (n) { flyTo(btn, E.nav.querySelector('[data-panel="eggs"]'), `<img src="${eggURL(top)}" class="flyegg">`, Math.min(n, 6)); toast(`${n} egg${n > 1 ? 's' : ''} stored in your Eggs tab`, '#9fd8c9'); }
+  }
+  save();
+  if (eggTotal(inv) <= 0) { setTimeout(() => { if (R.mode === 'haul') toShip(); }, 250); E.haul.classList.add('closing'); setTimeout(() => E.haul.classList.remove('closing'), 400); }
+  else showHaul(false);
+}
+
+// ---------------------------------------------------------------------------
+// juice: flying icons, gain popups, bumps
+// ---------------------------------------------------------------------------
+function appRect() { return E.app.getBoundingClientRect(); }
+function bump(el) { if (!el) return; el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); }
+function flyTo(fromEl, toEl, html, n = 1, onEach) {
+  if (!fromEl || !toEl) return;
+  const A = appRect(), f = fromEl.getBoundingClientRect(), t = toEl.getBoundingClientRect();
+  const x0 = f.left + f.width / 2 - A.left, y0 = f.top + f.height / 2 - A.top;
+  const x1 = t.left + t.width / 2 - A.left, y1 = t.top + t.height / 2 - A.top;
+  for (let i = 0; i < n; i++) {
+    const d = document.createElement('div');
+    d.className = 'flyer';
+    d.innerHTML = html;
+    d.style.left = x0 + 'px'; d.style.top = y0 + 'px';
+    E.fly.appendChild(d);
+    const jx = (Math.random() - 0.5) * 70, jy = -40 - Math.random() * 60;
+    const anim = d.animate([
+      { transform: 'translate(-50%,-50%) scale(.4)', opacity: 0 },
+      { transform: `translate(calc(-50% + ${jx}px), calc(-50% + ${jy}px)) scale(1.15)`, opacity: 1, offset: 0.3 },
+      { transform: `translate(calc(-50% + ${x1 - x0}px), calc(-50% + ${y1 - y0}px)) scale(.45)`, opacity: 0.9 },
+    ], { duration: 620 + i * 35, delay: i * 55, easing: 'cubic-bezier(.45,0,.8,.4)', fill: 'both' });
+    anim.onfinish = () => { d.remove(); bump(toEl); if (onEach) onEach(i); };
+  }
+}
+let coinTick = 0;
+function coinFly(fromEl, n) {
+  flyTo(fromEl, E.moneyPill, '<span class="flycoin">⛁</span>', n, () => {
+    const now = performance.now();
+    if (now - coinTick > 60) { coinTick = now; sfxPlay('ichor'); }
+  });
+}
+function eggFly(x, y, tier) {
+  const target = E.eggSlots;
+  if (!target || target.classList.contains('hidden')) return;
+  const A = appRect(), t = target.getBoundingClientRect();
+  const d = document.createElement('div');
+  d.className = 'flyer';
+  d.innerHTML = `<img src="${eggURL(tier)}" class="flyegg">`;
+  d.style.left = x + 'px'; d.style.top = y + 'px';
+  E.fly.appendChild(d);
+  const x1 = t.left + t.width / 2 - A.left, y1 = t.top + t.height / 2 - A.top;
+  d.animate([
+    { transform: 'translate(-50%,-50%) scale(1.4)', opacity: 1 },
+    { transform: `translate(calc(-50% + ${x1 - x}px), calc(-50% + ${y1 - y}px)) scale(.5)`, opacity: 0.8 },
+  ], { duration: 480, easing: 'cubic-bezier(.5,0,.9,.5)', fill: 'both' }).onfinish = () => { d.remove(); bump(target); };
+}
+function popGain(v) {
+  bump(E.moneyPill);
+  const d = document.createElement('div');
+  d.className = 'gainpop';
+  d.textContent = '+' + money(v);
+  E.hud.appendChild(d);
+  setTimeout(() => d.remove(), 1100);
+}
+function countUp(el, to) {
+  const t0 = performance.now(), dur = 600;
+  const step = (now) => {
+    const k = Math.min(1, (now - t0) / dur);
+    el.textContent = money(to * (1 - Math.pow(1 - k, 3)));
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
 
 // canvas tap during reveal
@@ -327,7 +489,7 @@ export function revealTap() {
 // ---------------------------------------------------------------------------
 // Panels
 // ---------------------------------------------------------------------------
-const TITLES = { upgrades: 'The Armory', crew: 'Hire Crew', ship: 'Shipwright', aquarium: 'Aquarium', codex: 'Bestiary', contracts: 'Contracts', menu: 'Captain\'s Log' };
+const TITLES = { upgrades: 'The Armory', crew: 'Hire Crew', ship: 'Shipwright', aquarium: 'Aquarium', eggs: 'Egg Hold', codex: 'Bestiary', contracts: 'Contracts', menu: 'Captain\'s Log' };
 function openPanel(name) {
   if (R.mode !== 'ship') return;
   R.panel = name;
@@ -344,12 +506,17 @@ function closePanel() {
 }
 function refreshPanel() { if (R.panel) renderPanel(); }
 
+let popPanel = null;
 function renderPanel() {
-  const fn = { upgrades: pUpgrades, crew: pCrew, ship: pShip, aquarium: pAquarium, codex: pCodex, contracts: pContracts, menu: pMenu }[R.panel];
+  const fn = { upgrades: pUpgrades, crew: pCrew, ship: pShip, aquarium: pAquarium, eggs: pEggs, codex: pCodex, contracts: pContracts, menu: pMenu }[R.panel];
   const st = E.sheetBody.scrollTop;
   E.sheetBody.innerHTML = fn ? fn() : '';
   E.sheetBody.scrollTop = st;
   updateAfford();
+  if (popPanel) {
+    E.sheetBody.querySelectorAll(popPanel).forEach((el) => { const row = el.closest('.row') || el; row.classList.add('pop'); });
+    popPanel = null;
+  }
 }
 function updateAfford() {
   E.sheetBody.querySelectorAll('[data-cost]').forEach((b) => {
@@ -403,18 +570,61 @@ function pShip() {
   return h;
 }
 
+function fishCard(f, st, inTank, full) {
+  const d = CREATURE_BY_ID[f.id];
+  const m = f.mut ? MUT_BY_ID[f.mut] : null;
+  const act = inTank
+    ? `<button class="mini" data-act="toBag" data-id="${f.uid}">remove</button>`
+    : `<button class="mini go" data-act="toTank" data-id="${f.uid}">${full ? 'swap in' : 'add'}</button>`;
+  return `<div class="fish ${inTank ? '' : 'stored'}" style="--rc:${RARITIES[d.r].color}" data-fish="${f.uid}"><img src="${creatureURL(f.id, f.mut)}" alt=""><b>${d.name}</b>
+    <small>${m ? `<span style="color:${m.color}">${m.name}</span> · ` : ''}${RARITIES[d.r].name}${f.colossal ? ' · COLOSSAL' : ''}</small>
+    <em>${inTank ? '' : 'would earn '}+${money(fishIncome(f, st))}/s</em><div class="fbtns">${act}<button class="mini" data-act="sellfish" data-id="${f.uid}">sell ${money(sellValue(f, st))}</button></div></div>`;
+}
 function pAquarium() {
   const st = stats();
-  let h = `<p class="sub">Tanks <b>${S.aquarium.length}/${st.aquaSlots}</b> · earning <b>${money(incomePerSec(st))}/s</b></p><div class="grid">`;
-  for (const f of S.aquarium) {
-    const d = CREATURE_BY_ID[f.id];
-    const m = f.mut ? MUT_BY_ID[f.mut] : null;
-    h += `<div class="fish" style="--rc:${RARITIES[d.r].color}"><img src="${creatureURL(f.id, f.mut)}" alt=""><b>${d.name}</b>
-    <small>${m ? `<span style="color:${m.color}">${m.name}</span> · ` : ''}${RARITIES[d.r].name}${f.colossal ? ' · COLOSSAL' : ''}</small>
-    <em>+${money(fishIncome(f, st))}/s</em><button class="mini" data-act="sellfish" data-id="${f.uid}">sell ${money(sellValue(f, st))}</button></div>`;
-  }
+  const full = S.aquarium.length >= st.aquaSlots;
+  // would equipping best change anything?
+  const all = S.aquarium.concat(S.bag).sort((a, b) => b.value - a.value).slice(0, st.aquaSlots);
+  let bestInc = 0;
+  for (const f of all) bestInc += fishIncome(f, st);
+  const gain = bestInc - incomePerSec(st);
+  let stored = 0;
+  for (const f of S.bag) stored += sellValue(f, st);
+  let h = `<p class="sub">Tanks <b>${S.aquarium.length}/${st.aquaSlots}</b> · earning <b>${money(incomePerSec(st))}/s</b> · storage <b>${S.bag.length}</b></p>
+  <div class="abtns"><button class="buy go wide" data-act="equipBest" ${gain > 0.001 ? '' : 'disabled'}>EQUIP BEST<b>${gain > 0.001 ? '+' + money(gain) + '/s' : 'already best'}</b></button>
+  <button class="buy wide" data-act="sellStored" ${S.bag.length ? '' : 'disabled'}>SELL ALL STORED<b>${money(stored)}</b></button></div>
+  <h4 class="shead">In tanks</h4><div class="grid">`;
+  for (const f of S.aquarium) h += fishCard(f, st, true, full);
   for (let i = S.aquarium.length; i < st.aquaSlots; i++) h += `<div class="fish empty"><span>empty tank</span></div>`;
-  h += `</div><p class="note">Aquarium creatures earn ${Math.round(AQUA_RATE * 1000) / 10}% of their value every second — even while you're away (at half rate, up to 8 hours).</p>`;
+  h += `</div><h4 class="shead">Storage <small>no limit · creatures here don't earn</small></h4>`;
+  if (!S.bag.length) h += `<p class="note">Creatures you keep while the tanks are full wait here.</p>`;
+  else {
+    h += '<div class="grid">';
+    S.bag.slice(0, 120).forEach((f) => (h += fishCard(f, st, false, full)));
+    h += '</div>';
+    if (S.bag.length > 120) h += `<p class="note">+${S.bag.length - 120} more stored</p>`;
+  }
+  h += `<p class="note">Tank creatures earn ${Math.round(AQUA_RATE * 1000) / 10}% of their value every second, even while you're away (at half rate, up to 8 hours). Build more Aquarium Tanks in the Shipwright for more slots.</p>`;
+  return h;
+}
+
+function pEggs() {
+  const st = stats();
+  const inv = S.eggInv;
+  const tiers = Object.keys(inv).map(Number).filter((t) => inv[t] > 0).sort((a, b) => b - a);
+  let tot = 0;
+  for (const t of tiers) tot += eggValue(t, st) * inv[t];
+  let h = `<p class="sub">Stored eggs <b>${eggTotal()}</b> · worth <b>${money(tot)}</b> if sold · no limit</p>`;
+  if (!tiers.length) return h + `<p class="note">Eggs you STORE from a haul wait here until you're ready to hatch or sell them.</p>`;
+  h += `<div class="abtns"><button class="buy go wide" data-act="eggHatchAll">HATCH EVERYTHING<b>${eggTotal()} eggs</b></button><button class="buy wide" data-act="eggSellAll">SELL EVERYTHING<b>${money(tot)}</b></button></div>`;
+  for (const t of tiers) {
+    const eg = EGGS[t - 1], v = eggValue(t, st);
+    h += `<div class="row erow" style="--ec:${eg.color}"><div class="hegg"><img src="${eggURL(t)}" alt=""><span class="hcount">×${fmt(inv[t])}</span></div>
+    <div class="info"><b style="color:${eg.color}">${eg.name}</b><br><span>${money(v)} each</span></div>
+    <div class="ebtns"><button class="mini go" data-act="eggHatch" data-id="${t}">hatch 1</button><button class="mini go" data-act="eggHatchT" data-id="${t}">hatch all</button>
+    <button class="mini" data-act="eggSell" data-id="${t}">sell 1</button><button class="mini" data-act="eggSellT" data-id="${t}">sell all</button></div></div>`;
+  }
+  h += `<p class="note">Haul luck from a dive only applies when you hatch straight from that haul.</p>`;
   return h;
 }
 
@@ -479,11 +689,25 @@ function onSheetClick(e) {
   if (!b || b.disabled) return;
   const id = b.dataset.id;
   switch (b.dataset.act) {
-    case 'upg': if (buyUpgrade(id)) flashBtn(b); break;
+    case 'upg': if (buyUpgrade(id)) { flashBtn(b); popPanel = `[data-act="upg"][data-id="${id}"]`; } break;
     case 'cage': if (buyCage(+id)) flashBtn(b); break;
-    case 'crew': if (hireCrew(id)) flashBtn(b); break;
+    case 'crew': if (hireCrew(id)) { flashBtn(b); popPanel = `[data-act="crew"][data-id="${id}"]`; } break;
     case 'room': if (buildRoom(id)) { flashBtn(b); toast('New room built', '#ffd34d'); } break;
-    case 'sellfish': { const v = sellAquarium(+id); toast('Sold for ' + money(v), '#ffd34d'); break; }
+    case 'sellfish': { coinFly(b, 4); sellFish(+id); break; }
+    case 'toBag': fishToBag(+id); break;
+    case 'toTank': fishToTank(+id); flyTo(b, E.moneyPill, '<span class="flycoin">✦</span>', 1); break;
+    case 'equipBest': {
+      const before = incomePerSec();
+      if (equipBest()) { sfxPlay('buy'); toast(`Tanks now earn ${money(incomePerSec())}/s (+${money(incomePerSec() - before)})`, '#9dff7a'); popPanel = '.fish'; }
+      break;
+    }
+    case 'sellStored': { const v = sellAllStored(); if (v) { coinFly(b, 10); toast('Sold storage for ' + money(v), '#ffd34d'); } break; }
+    case 'eggHatch': hatchQueue(takeEggs(S.eggInv, +id, 1), 0, 'eggs'); save(); return;
+    case 'eggHatchT': hatchQueue(takeEggs(S.eggInv, +id, S.eggInv[id] || 0), 0, 'eggs'); save(); return;
+    case 'eggHatchAll': { const l = []; for (const k of Object.keys(S.eggInv)) l.push(...takeEggs(S.eggInv, +k, S.eggInv[k])); hatchQueue(l, 0, 'eggs'); save(); return; }
+    case 'eggSell': sellEggs(S.eggInv, +id, 1); coinFly(b, 3); break;
+    case 'eggSellT': sellEggs(S.eggInv, +id, S.eggInv[id] || 0); coinFly(b, 8); break;
+    case 'eggSellAll': { let v = 0; for (const k of Object.keys(S.eggInv)) v += sellEggs(S.eggInv, +k, S.eggInv[k]); if (v) { coinFly(b, 12); toast('Sold every stored egg for ' + money(v), '#ffd34d'); } break; }
     case 'codex': codexDetail(id); return;
     case 'dread': dreadInfo(); return;
     case 'claim': claimContract(id); break;

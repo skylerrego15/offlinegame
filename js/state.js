@@ -15,6 +15,8 @@ export function defaultState() {
     crew: Object.fromEntries(CREW.map((c) => [c.id, 0])),
     rooms: ['tank', 'bunk'],
     aquarium: [],
+    bag: [],
+    eggInv: {},
     codex: {},
     dread: 0,
     stats: { dives: 0, maxDepth: 0, maxCombo: 0, hatched: 0, eggs: 0, offerings: 0, bestValue: 0 },
@@ -48,6 +50,8 @@ export function load() {
       if (!Array.isArray(S.rooms) || !S.rooms.length) S.rooms = base.rooms;
       if (!Array.isArray(S.cages) || !S.cages.length) S.cages = [0];
       if (!S.cages.includes(S.cage)) S.cage = 0;
+      if (!Array.isArray(S.bag)) S.bag = [];
+      if (!S.eggInv || typeof S.eggInv !== 'object') S.eggInv = {};
       return true;
     }
   } catch (e) {
@@ -134,6 +138,14 @@ export function incomePerSec(st = stats()) {
 }
 export function fishIncome(f, st = stats()) {
   return f.value * AQUA_RATE * st.incomeMult;
+}
+export function eggValue(tier, st = stats()) {
+  return EGGS[tier - 1].ichor * 2.5 * st.sellMult;
+}
+export function eggTotal(inv = S.eggInv) {
+  let n = 0;
+  for (const k in inv) n += inv[k] || 0;
+  return n;
 }
 export function sellValue(f, st = stats()) {
   return f.value * st.sellMult;

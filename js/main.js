@@ -96,7 +96,8 @@ function drawHarpoon() {
   const g = c.createRadialGradient(hx, hy, 4, hx, hy, 70 * lt);
   g.addColorStop(0, 'rgba(255,230,170,0.25)'); g.addColorStop(1, 'rgba(255,230,170,0)');
   c.fillStyle = g; c.beginPath(); c.arc(hx, hy, 70 * lt, 0, TAU); c.fill();
-  drawCage(c, hx, hy, cw, _S.cage, hp.eggs, R.t, tilt);
+  const sq = hp.squash || 0;
+  drawCage(c, hx, hy, cw * (1 + 0.16 * sq * Math.cos(R.t * 40)), _S.cage, hp.eggs, R.t, tilt);
 }
 
 function render(dt) {

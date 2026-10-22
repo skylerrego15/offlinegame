@@ -115,7 +115,6 @@ export function zoneAt(depth) {
 export const UPGRADES = [
   { id: 'range', name: 'Harpoon Line', icon: '⇣', desc: 'Base dive depth', max: 40, base: 60, growth: 1.62, val: (l) => 70 * Math.pow(1.16, l), show: (v) => Math.floor(v) + 'm' },
   { id: 'speed', name: 'Powder Charge', icon: '➶', desc: 'How fast the harpoon sinks (capped so you can still aim)', max: 30, base: 45, growth: 1.55, val: (l) => 24 + 1.4 * l, show: (v) => Math.floor(v) + ' m/s' },
-  { id: 'barbs', name: 'Barbed Tines', icon: '⋔', desc: 'Eggs the harpoon can carry. When full, better eggs replace your worst one', max: 12, base: 150, growth: 2.15, val: (l) => 3 + l, show: (v) => v + ' eggs' },
   { id: 'steer', name: 'Rudder Fins', icon: '⇄', desc: 'How fast the harpoon snaps to your finger', max: 15, base: 80, growth: 1.7, val: (l) => 1 + 0.1 * l, show: (v) => v.toFixed(1) + 'x' },
   { id: 'winch', name: 'Bone Winch', icon: '⟲', desc: 'Reel speed + safe tension', max: 25, base: 70, growth: 1.6, val: (l) => l, show: (v) => 'Lv ' + v },
   { id: 'lantern', name: 'Corpse-Light Lantern', icon: '✺', desc: 'Hatch luck + light radius', max: 30, base: 200, growth: 1.75, val: (l) => 0.08 * l, show: (v) => '+' + Math.round(v * 100) + '% luck' },

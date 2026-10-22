@@ -1,3 +1,4 @@
+import { CAGES } from './cage.js';
 import { UPGRADES, CREW, CREW_BY_ID, ROOMS, CREATURES, MUTATIONS, AQUA_RATE, ZONES, RARITIES, EGGS } from './data.js';
 import { randi, pick, fmt } from './util.js';
 
@@ -17,6 +18,8 @@ export function defaultState() {
     codex: {},
     dread: 0,
     stats: { dives: 0, maxDepth: 0, maxCombo: 0, hatched: 0, eggs: 0, offerings: 0, bestValue: 0 },
+    cages: [0],
+    cage: 0,
     contracts: [],
     contractsDone: 0,
     settings: { sfx: true, music: true, skipCommon: false, autoSell: -1, haptics: true },
@@ -43,6 +46,8 @@ export function load() {
       S.stats = Object.assign(base.stats, d.stats || {});
       S.settings = Object.assign(base.settings, d.settings || {});
       if (!Array.isArray(S.rooms) || !S.rooms.length) S.rooms = base.rooms;
+      if (!Array.isArray(S.cages) || !S.cages.length) S.cages = [0];
+      if (!S.cages.includes(S.cage)) S.cage = 0;
       return true;
     }
   } catch (e) {
@@ -98,13 +103,14 @@ export function stats() {
   const codexMult = 1 + 0.005 * codexMutCount() + 0.01 * codexSpecies();
   let luck = 0.08 * u.lantern + (0.03 * c.occultist + 0.01 * c.chaplain) * eff + 0.06 * rShrine + S.dread * 0.004 + 0.02 * S.sigils;
   if (omenActive('choir')) luck += 0.6;
+  const cg = CAGES[S.cage] || CAGES[0];
+  luck += cg.luck;
   const reelBase = 55 * Math.pow(1.1, u.winch) * (1 + 0.04 * c.deckhand * eff + 0.08 * rWinch);
   return {
     eff,
     range: 70 * Math.pow(1.16, u.range),
     speed: Math.min(72, (24 + 1.4 * u.speed) * (1 + 0.02 * c.gunner * eff)),
     steer: (1 + 0.1 * u.steer) * (1 + 0.02 * c.gunner * eff),
-    capacity: 3 + u.barbs,
     safe: Math.min(0.94, 0.55 + 0.022 * u.winch + 0.03 * rWinch),
     reelBase,
     luck,
@@ -114,10 +120,10 @@ export function stats() {
     density: 1 + 0.05 * c.lookout * eff,
     aquaSlots: 4 * roomCount('tank'),
     crewCap: 4 * roomCount('bunk') + 2,
-    sellMult: sigilMult * codexMult * (1 + 0.05 * rRef) * (omenActive('ichor') ? 2 : 1),
-    incomeMult: sigilMult * codexMult * (1 + 0.04 * c.aquarist * eff + 0.03 * rTrophy),
+    sellMult: sigilMult * codexMult * cg.sell * (1 + 0.05 * rRef) * (omenActive('ichor') ? 2 : 1),
+    incomeMult: sigilMult * codexMult * cg.aqua * (1 + 0.04 * c.aquarist * eff + 0.03 * rTrophy),
     dreadRate: 0.008 * c.occultist - 0.02 * c.chaplain - 0.03 * rShrine - 0.012,
-    mutMult: omenActive('fog') ? 3 : 1,
+    mutMult: (omenActive('fog') ? 3 : 1) * cg.mut,
   };
 }
 
@@ -231,6 +237,8 @@ export function doOffering() {
     tut: S.tut,
     uid: S.uid,
     contractsDone: S.contractsDone,
+    cages: S.cages,
+    cage: S.cage,
   };
   S = Object.assign(defaultState(), keep);
   S.money = 50 + 200 * S.sigils;

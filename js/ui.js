@@ -6,10 +6,11 @@ import {
 } from './state.js';
 import { UPGRADES, CREW, ROOMS, CREATURES, CREATURE_BY_ID, RARITIES, MUTATIONS, MUT_BY_ID, EGGS, ZONES, OMEN_BY_ID, zoneAt, AQUA_RATE } from './data.js';
 import { creatureURL, eggURL } from './assets.js';
+import { CAGES, cageIcon, cageBonuses } from './cage.js';
 import { money, fmt, meters, clamp } from './util.js';
 import {
   hatch, sellInst, keepInst, weakestFish, sellAquarium, buyUpgrade, hireCrew, buildRoom, startReel, toShip,
-  claimContract, rerollContract, rerollCost, tapVisit, reelSafe, fireHarpoon, COMBO_WINDOW,
+  claimContract, rerollContract, rerollCost, tapVisit, reelSafe, fireHarpoon, COMBO_WINDOW, buyCage,
 } from './game.js';
 import { startReveal, skipReveal, endReveal, RV, REVEALS } from './reveal.js';
 import { layoutShip } from './ship.js';
@@ -126,12 +127,11 @@ export function updateUI(dt) {
     E.zoneV.textContent = zoneAt(y).name;
     E.maxV.textContent = 'line ' + meters(hp.maxDepth);
     E.lineFill.style.height = clamp((y / hp.maxDepth) * 100, 0, 100) + '%';
-    const cap = st.capacity;
+    const cnt = {};
+    for (const t of hp.eggs) cnt[t] = (cnt[t] || 0) + 1;
     let html = '';
-    for (let i = 0; i < cap; i++) {
-      const t = hp.eggs[i];
-      html += t ? `<img src="${eggURL(t)}" alt="">` : '<span></span>';
-    }
+    for (let t = 8; t >= 1; t--) if (cnt[t]) html += `<em><img src="${eggURL(t)}" alt="">${cnt[t] > 1 ? '×' + cnt[t] : ''}</em>`;
+    if (!html) html = '<small>cage empty</small>';
     if (E.eggSlots._h !== html) { E.eggSlots.innerHTML = html; E.eggSlots._h = html; E.reelEggs.innerHTML = html; }
     E.shieldV.textContent = hp.shields ? '⛨'.repeat(hp.shields) : '';
     if (R.mode === 'dive' && hp.combo > 0) {
@@ -360,7 +360,14 @@ function costBtn(act, id, cost, label = '') {
 
 function pUpgrades() {
   const st = stats();
-  let h = `<p class="sub">Range <b>${meters(st.range)}</b> · Speed <b>${Math.floor(st.speed)} m/s</b> · Carry <b>${st.capacity}</b> · Luck <b>+${Math.round(st.luck * 100)}%</b></p>`;
+  let h = `<p class="sub">Range <b>${meters(st.range)}</b> · Speed <b>${Math.floor(st.speed)} m/s</b> · Luck <b>+${Math.round(st.luck * 100)}%</b></p>`;
+  h += `<h4 class="shead">Cages <small>bought cages are kept forever · the equipped cage's boosts apply</small></h4>`;
+  CAGES.forEach((cg, i) => {
+    const owned = S.cages.includes(i), on = S.cage === i;
+    const btn = on ? '<button class="buy" disabled>EQUIPPED</button>' : owned ? `<button class="buy go" data-act="cage" data-id="${i}">EQUIP</button>` : costBtn('cage', i, cg.cost);
+    h += `<div class="row cagerow ${on ? 'on' : ''}" style="--cg:${cg.glow || '#8a6440'}"><img class="cimg" src="${cageIcon(i)}" alt=""><div class="info"><b>${cg.name}</b><br><em>${cageBonuses(cg)}</em><br><span>${cg.lore}</span></div>${btn}</div>`;
+  });
+  h += `<h4 class="shead">Harpoon</h4>`;
   for (const u of UPGRADES) {
     const l = S.upgrades[u.id];
     const maxed = l >= u.max;
@@ -469,6 +476,7 @@ function onSheetClick(e) {
   const id = b.dataset.id;
   switch (b.dataset.act) {
     case 'upg': if (buyUpgrade(id)) flashBtn(b); break;
+    case 'cage': if (buyCage(+id)) flashBtn(b); break;
     case 'crew': if (hireCrew(id)) flashBtn(b); break;
     case 'room': if (buildRoom(id)) { flashBtn(b); toast('New room built', '#ffd34d'); } break;
     case 'sellfish': { const v = sellAquarium(+id); toast('Sold for ' + money(v), '#ffd34d'); break; }

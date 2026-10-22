@@ -10,6 +10,8 @@ import { drawReveal } from './reveal.js';
 import { initUI, updateUI, revealTap, openPanelFor, showOffline } from './ui.js';
 import { clamp, TAU, mixHex, rgba } from './util.js';
 import { EGGS } from './data.js';
+import { drawCage } from './cage.js';
+import { S as _S } from './state.js';
 
 const cv = document.getElementById('cv');
 const c = cv.getContext('2d');
@@ -82,30 +84,16 @@ function drawHarpoon() {
   c.lineWidth = reel ? 1.6 + hp.tension * 1.4 : 1.4;
   if (reel && hp.tension > 0.7) c.lineWidth += Math.sin(R.t * 60) * 0.6;
   c.beginPath(); c.moveTo(cx, cy);
-  c.quadraticCurveTo((cx + hx) / 2 - sag * 0.5, (cy + hy) / 2 + sag, hx, hy);
+  c.quadraticCurveTo((cx + hx) / 2 - sag * 0.5, (cy + hy) / 2 + sag, hx, hy - 34);
   c.stroke();
-  // attached eggs dangle along the trail
-  const tr = hp.trail;
-  hp.eggs.forEach((t, i) => {
-    const idx = tr.length - 1 - (i + 1) * 4;
-    const p = tr[Math.max(0, idx)] || [hp.x, hp.y];
-    const ex = p[0] * PPM + Math.sin(R.t * 4 + i) * 3, ey = p[1] * PPM - R.camY + (reel ? 14 + i * 4 : -10);
-    drawEgg(c, ex, ey, t, eggSize(t) * PPM * 0.72, 1, Math.sin(R.t * 3 + i) * 0.3);
-  });
-  // spear
-  const a = reel ? 0 : hp.angle;
-  c.save(); c.translate(hx, hy); c.rotate(-a);
-  const g = c.createRadialGradient(0, 8, 1, 0, 8, 46 * stats().light);
-  g.addColorStop(0, 'rgba(255,230,170,0.35)'); g.addColorStop(1, 'rgba(255,230,170,0)');
-  c.fillStyle = g; c.beginPath(); c.arc(0, 8, 46 * stats().light, 0, TAU); c.fill();
-  c.strokeStyle = '#6d6a64'; c.lineWidth = 3;
-  c.beginPath(); c.moveTo(0, -24); c.lineTo(0, 6); c.stroke();
-  c.fillStyle = '#d9d2c2';
-  c.beginPath(); c.moveTo(-5, 4); c.lineTo(0, 18); c.lineTo(5, 4); c.closePath(); c.fill();
-  c.strokeStyle = '#bdb6a6'; c.lineWidth = 2;
-  c.beginPath(); c.moveTo(-5, 4); c.lineTo(-8, -2); c.moveTo(5, 4); c.lineTo(8, -2); c.stroke();
-  c.fillStyle = '#8a2a2a'; c.fillRect(-3, -26, 6, 4);
-  c.restore();
+  // the cage, with every egg caught so far piled inside
+  const cw = 58;
+  const tilt = reel ? Math.sin(R.t * 3) * 0.05 * (1 + hp.tension * 3) : hp.angle * 0.5;
+  const lt = stats().light;
+  const g = c.createRadialGradient(hx, hy, 4, hx, hy, 70 * lt);
+  g.addColorStop(0, 'rgba(255,230,170,0.25)'); g.addColorStop(1, 'rgba(255,230,170,0)');
+  c.fillStyle = g; c.beginPath(); c.arc(hx, hy, 70 * lt, 0, TAU); c.fill();
+  drawCage(c, hx, hy, cw, _S.cage, hp.eggs, R.t, tilt);
 }
 
 function render(dt) {

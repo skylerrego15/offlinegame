@@ -10,6 +10,7 @@ import { burst, ring, spark, floatText, shake, flash, comboFX, stop } from './fx
 import { sfxPlay, vibrate, setAmbience } from './audio.js';
 import { clamp, rand, pick, weighted, gauss, fmt, money, meters, lerp } from './util.js';
 import { UI } from './ui-bridge.js';
+import { CAGES } from './cage.js';
 
 // ---------------------------------------------------------------------------
 // Hatching
@@ -95,6 +96,19 @@ export function hireCrew(id) {
   sfxPlay('buy');
   return true;
 }
+export function buyCage(i) {
+  const cg = CAGES[i];
+  if (!cg) return false;
+  if (S.cages.includes(i)) { S.cage = i; sfxPlay('ui'); return true; }
+  if (S.money < cg.cost) { sfxPlay('deny'); return false; }
+  S.money -= cg.cost;
+  S.cages.push(i);
+  S.cage = i;
+  sfxPlay('buy'); shake(6); flash(cg.glow || '#ffffff', 0.25);
+  UI.toast(`${cg.name} equipped!`, cg.glow || '#ffd34d');
+  return true;
+}
+
 export function buildRoom(type) {
   const cost = roomCost();
   if (S.money < cost) { sfxPlay('deny'); return false; }
@@ -140,37 +154,11 @@ function hpScreen() {
   return [R.hp.x * R.PPM, R.hp.y * R.PPM - R.camY];
 }
 
-// Put an egg on the harpoon. When the barbs are full, a better egg replaces the
-// worst one held; whichever egg is left over is rendered down into ichor (money).
-function stowEgg(tier, wx, wy, small = false) {
-  const hp = R.hp, st = stats();
-  const ex = wx * R.PPM, ey = wy * R.PPM;
-  const col = EGGS[tier - 1].color;
-  const ichorOf = (t) => EGGS[t - 1].ichor * (1 + hp.zone * 0.15) * st.sellMult;
-  if (hp.eggs.length < st.capacity) {
-    hp.eggs.push(tier);
-    hp.eggs.sort((a, b) => b - a);
-    floatText(ex, ey - 20, (small ? 'SNAGGED ' : '') + EGGS[tier - 1].name, col, small ? 13 : 15);
-    return;
-  }
-  let lo = 0;
-  for (let i = 1; i < hp.eggs.length; i++) if (hp.eggs[i] < hp.eggs[lo]) lo = i;
-  if (tier > hp.eggs[lo]) {
-    const old = hp.eggs[lo];
-    hp.eggs[lo] = tier;
-    hp.eggs.sort((a, b) => b - a);
-    const v = ichorOf(old);
-    addMoney(v); hp.ichor += v;
-    floatText(ex, ey - 24, `${EGGS[old - 1].name.replace(' Egg', '')} ➜ ${EGGS[tier - 1].name.replace(' Egg', '')}!`, col, 17);
-    floatText(ex, ey + 4, '+' + money(v) + ' ichor', '#9dff7a', 12);
-    ring(ex, ey, col, 70, 0.5);
-    sfxPlay('pickup');
-  } else {
-    const v = ichorOf(tier);
-    addMoney(v); hp.ichor += v;
-    floatText(ex, ey - 20, 'FULL · +' + money(v) + ' ichor', '#9dff7a', 14);
-    sfxPlay('ichor');
-  }
+// Drop an egg into the cage. No limit.
+function stowEgg(tier, wx, wy) {
+  const hp = R.hp;
+  hp.eggs.push(tier);
+  floatText(wx * R.PPM, wy * R.PPM - 26, EGGS[tier - 1].name, EGGS[tier - 1].color, 15);
 }
 
 function takeEgg(e) {
@@ -283,7 +271,7 @@ export function updateDive(dt) {
   // eggs
   for (const e of f.eggs) {
     if (e.taken || Math.abs(e.y - hp.y) > 8) continue;
-    const rr = eggSize(e.tier) * 0.55 + 2;
+    const rr = eggSize(e.tier) * 0.45 + 4.2;
     if ((e.x - hp.x) ** 2 + (e.y - hp.y) ** 2 < rr * rr) takeEgg(e);
   }
   // pickups
@@ -370,7 +358,7 @@ function segDist(px, py, ax, ay, bx, by) {
 
 export function reelSafe() {
   const st = stats();
-  return Math.max(0.3, st.safe - 0.015 * (R.hp ? R.hp.eggs.length : 0));
+  return Math.max(0.4, st.safe - Math.min(0.12, 0.006 * (R.hp ? R.hp.eggs.length : 0)));
 }
 
 export function updateReel(dt) {
@@ -385,7 +373,7 @@ export function updateReel(dt) {
   if (v > 1) sfxPlay('ratchet', p);
   // tension
   const safe = reelSafe();
-  if (p > safe) hp.tension += (p - safe) * 1.9 * dt * (1 + hp.eggs.length * 0.06);
+  if (p > safe) hp.tension += (p - safe) * 1.9 * dt * (1 + Math.min(hp.eggs.length, 10) * 0.04);
   else hp.tension = Math.max(0, hp.tension - 0.45 * dt);
   if (p > safe - 0.12 && p <= safe && hp.eggs.length) {
     hp.taut += dt;
@@ -399,20 +387,10 @@ export function updateReel(dt) {
       const i = Math.floor(Math.random() * hp.eggs.length);
       const [t] = hp.eggs.splice(i, 1);
       hp.snapped++;
-      floatText(hp.x * PPM, hp.y * PPM - 20, 'SNAP! LOST ' + EGGS[t - 1].name.toUpperCase(), '#ff5a5a', 16);
+      floatText(hp.x * PPM, hp.y * PPM - 20, 'SNAP! AN EGG FELL OUT: ' + EGGS[t - 1].name.toUpperCase(), '#ff5a5a', 16);
       burst(hp.x * PPM, hp.y * PPM, 20, { color: EGGS[t - 1].color, speed: 120, grav: 200 });
     } else {
       floatText(hp.x * PPM, hp.y * PPM - 20, 'LINE STRAIN!', '#ff5a5a', 16);
-    }
-  }
-  // snag drifting eggs on the way up
-  for (const e of f.eggs) {
-    if (e.taken || Math.abs(e.y - hp.y) > 6) continue;
-    const rr = eggSize(e.tier) * 0.5 + 1;
-    if ((e.x - hp.x) ** 2 + (e.y - hp.y) ** 2 < rr * rr) {
-      e.taken = true;
-      sfxPlay('hit', 1);
-      stowEgg(e.tier, e.x, e.y, true);
     }
   }
   // lurker

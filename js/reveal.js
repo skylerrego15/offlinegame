@@ -1,18 +1,24 @@
-// 20 gacha reveal animations for hatching eggs
+// Gacha reveal animations for hatching eggs. Shader-driven ones render through gl.js.
 import { R } from './rt.js';
 import { RARITIES, EGGS, MUT_BY_ID } from './data.js';
 import { IMG, creatureImg } from './assets.js';
-import { burst, ring, spark, shake, flash, floatText } from './fx.js';
+import { shake, flash, floatText, clearFx } from './fx.js';
+import { renderFX, glOk } from './gl.js';
+import { makeBolt, drawBolt } from './bolt.js';
 import { sfxPlay, vibrate } from './audio.js';
 import { TAU, clamp, ease, lerp, rand, seg, seeded, rgba, hsl } from './util.js';
 
 export const REVEALS = [
-  'Crackle', 'Bubble Burst', 'Ink Bloom', 'Tide Spin', 'Lantern Beam',
-  'Sonar Ping', 'Whirlpool', 'Stormcall', 'Coral Bloom', 'Lantern Swarm',
-  'The Eye Opens', 'The Grasp', 'Blood Moon', 'Rune Circle', 'The Rift',
-  'The Choir', 'The Maw', 'Void Collapse', 'Doom Clock', 'THE AWAKENING',
+  'Crackle', 'Bubble Burst', null, 'Tide Spin', 'Lantern Beam',
+  'Sonar Ping', 'Whirlpool', null, null, 'Lantern Swarm',
+  null, 'The Grasp', 'Blood Moon', 'Rune Circle', 'The Rift',
+  'The Choir', null, 'Void Collapse', 'Doom Clock', null,
+  'Black Tide', 'Thunderhead', 'Caustic Bloom', 'Hydrothermal Eruption', 'Bioluminescent Swarm',
+  'Event Horizon', "Leviathan's Gaze", 'From Below', 'Abyssal Aurora', 'Shattered Reality',
 ];
-const POOLS = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 5], [11, 12, 13], [14, 15, 16], [17, 18, 16], [19, 17]];
+const POOLS = [[0, 1, 22], [3, 4, 5, 24], [6, 9, 20, 21], [11, 12, 23, 28], [13, 26, 27, 21], [14, 15, 26, 27], [17, 18, 25], [29, 25]];
+// shader backdrop per animation: [effect, resolution scale]
+const SHADER = { 20: ['blacktide', 0.55], 21: ['thunder', 0.5], 22: ['caustic', 0.55], 23: ['vent', 0.5], 24: ['biolum', 0.5], 25: ['horizon', 0.7], 26: ['gaze', 0.75], 27: ['deep', 0.5], 28: ['aurora', 0.55], 29: ['shatter', 0.6] };
 const DUR = [1.5, 1.8, 2.3, 2.8, 3.4, 4.0, 4.8, 6.2];
 
 export const RV = { active: false, item: null, anim: 0, t: 0, dur: 1, hatchK: 0.62, fired: new Set(), held: false, onDone: null, seed: 1, hold: 0 };
@@ -25,8 +31,11 @@ export function startReveal(item, onDone) {
   if (r >= 2 && Math.random() < 0.15) RV.anim = POOLS[Math.min(7, r + 1)][0];
   if (r === 0 && Math.random() < 0.08) RV.anim = 3;
   RV.active = true; RV.item = item; RV.t = 0; RV.held = false; RV.hold = 0;
-  RV.dur = DUR[r] * (RV.anim >= 17 ? 1.15 : 1);
-  RV.hatchK = RV.anim === 19 ? 0.72 : RV.anim === 17 ? 0.68 : 0.62;
+  RV.dur = DUR[r] * (RV.anim === 17 || RV.anim === 18 || RV.anim >= 25 ? 1.15 : 1);
+  RV.hatchK = RV.anim === 29 ? 0.7 : RV.anim === 17 || RV.anim === 25 ? 0.68 : 0.62;
+  clearFx();
+  RV.hT = 0; RV.flash = 0; RV.flashX = 0.5; RV.bolts = []; RV.plank = null;
+  LP.length = 0; FR.length = 0;
   RV.fired = new Set(); RV.onDone = onDone; RV.seed = Math.floor(Math.random() * 1e9);
   if (r >= 2) sfxPlay('riser', RV.dur * RV.hatchK);
 }
@@ -48,17 +57,159 @@ function hatchMoment() {
   const col = RARITIES[r].color;
   const cx = R.W / 2, cy = R.H * 0.4;
   sfxPlay('reveal', r);
-  shake(4 + r * 2.5);
-  flash(r >= 6 ? '#ffffff' : col, 0.35 + r * 0.06);
+  shake(4 + r * 2.2);
+  flash(r >= 6 ? '#ffffff' : col, 0.12 + r * 0.03);
   vibrate(30 + r * 15);
-  burst(cx, cy, 30 + r * 14, { scr: true, color: EGGS[RV.item.tier - 1].color, kind: 'shard', speed: 380 + r * 40, size: 4 + r * 0.6, life: 1.2, grav: 300, drag: 1.2 });
-  burst(cx, cy, 20 + r * 12, { scr: true, color: col, speed: 300 + r * 50, size: 2.5, life: 1.0 });
-  ring(cx, cy, col, 180 + r * 40, 0.8, true, 6);
-  if (r >= 4) setTimeout(() => ring(cx, cy, '#ffffff', 260 + r * 30, 0.9, true, 3), 120);
+  shellBreak(cx, cy, E(), 8 + r);
+  bloom(cx, cy, R.W * (0.7 + r * 0.06), col, 0.7);
+  ring(cx, cy, col, R.W * (0.55 + r * 0.06), 0.9);
+  if (r >= 4) setTimeout(() => ring(cx, cy, '#ffffff', R.W * (0.7 + r * 0.05), 1.0), 110);
+  burst(cx, cy, 16 + r * 10, { color: RARITIES[r].glow, speed: 260 + r * 40, size: 2.2, life: 1.1 });
   if (RV.item.inst.mut) {
     const m = MUT_BY_ID[RV.item.inst.mut];
-    setTimeout(() => { burst(cx, cy, 50, { scr: true, color: m.color, speed: 260, life: 1.4 }); ring(cx, cy, m.color, 220, 1, true, 4); sfxPlay('combo', 5); }, 260);
+    setTimeout(() => { burst(cx, cy, 40, { color: m.color, speed: 240, life: 1.4 }); ring(cx, cy, m.color, R.W * 0.6, 1.1); sfxPlay('combo', 5); }, 260);
   }
+}
+
+// ---------------------------------------------------------------------------
+// local particle layer: drawn BEHIND the hatched creature, never on top of it
+// ---------------------------------------------------------------------------
+const LP = [];
+const FR = [];
+const glowCache = {};
+function glowSprite(col) {
+  if (glowCache[col]) return glowCache[col];
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 64;
+  const g = cv.getContext('2d');
+  const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,255,255,1)');
+  gr.addColorStop(0.12, rgba(col, 0.95));
+  gr.addColorStop(0.4, rgba(col, 0.35));
+  gr.addColorStop(1, rgba(col, 0));
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  return (glowCache[col] = cv);
+}
+let bubbleSpr = null;
+function bubbleSprite() {
+  if (bubbleSpr) return bubbleSpr;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 64;
+  const g = cv.getContext('2d');
+  const gr = g.createRadialGradient(32, 32, 18, 32, 32, 31);
+  gr.addColorStop(0, 'rgba(180,240,255,0.04)'); gr.addColorStop(0.75, 'rgba(190,245,255,0.18)'); gr.addColorStop(0.95, 'rgba(230,255,255,0.75)'); gr.addColorStop(1, 'rgba(230,255,255,0)');
+  g.fillStyle = gr; g.beginPath(); g.arc(32, 32, 31, 0, TAU); g.fill();
+  const sp = g.createRadialGradient(22, 21, 0, 22, 21, 9);
+  sp.addColorStop(0, 'rgba(255,255,255,0.95)'); sp.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = sp; g.beginPath(); g.arc(22, 21, 9, 0, TAU); g.fill();
+  return (bubbleSpr = cv);
+}
+function spark(x, y, o = {}) {
+  if (LP.length > 900) LP.shift();
+  const life = o.life ?? rand(0.4, 0.9);
+  LP.push({
+    x, y, vx: o.vx ?? rand(-1, 1) * (o.speed ?? 120), vy: o.vy ?? rand(-1, 1) * (o.speed ?? 120),
+    life, max: life, size: o.size ?? rand(1.5, 3.5), color: o.color ?? '#fff',
+    grav: o.grav ?? 0, drag: o.drag ?? 2.2, kind: o.kind || 'dot',
+  });
+}
+function burst(x, y, n, o = {}) {
+  for (let i = 0; i < n; i++) {
+    const a = rand(0, TAU), sp = rand(0.3, 1) * (o.speed ?? 200);
+    spark(x, y, Object.assign({}, o, { vx: Math.cos(a) * sp, vy: Math.sin(a) * sp }));
+  }
+}
+function ring(x, y, color, maxR = 120, life = 0.8) {
+  LP.push({ x, y, vx: 0, vy: 0, life, max: life, size: maxR, color, grav: 0, drag: 0, kind: 'ring' });
+}
+function bloom(x, y, rad, color, life = 0.6) {
+  LP.push({ x, y, vx: 0, vy: 0, life, max: life, size: rad, color, grav: 0, drag: 0, kind: 'bloom' });
+}
+// break the real egg image into textured shell fragments
+function shellBreak(cx, cy, size, n) {
+  const im = IMG.eggs[RV.item.tier];
+  if (!im) return;
+  const h = size, w = (h * im.naturalWidth) / im.naturalHeight;
+  const angs = [];
+  for (let i = 0; i < n; i++) angs.push((i / n) * TAU + rand(-0.25, 0.25) * (TAU / n));
+  angs.sort((a, b) => a - b);
+  for (let i = 0; i < n; i++) {
+    const a0 = angs[i], a1 = i + 1 < n ? angs[i + 1] : angs[0] + TAU;
+    const inner = [rand(-0.08, 0.08) * w, rand(-0.08, 0.08) * h];
+    const poly = [inner];
+    for (let s = 0; s <= 3; s++) {
+      const a = a0 + ((a1 - a0) * s) / 3;
+      const jag = s === 0 || s === 3 ? 0.55 + Math.random() * 0.2 : 1.15;
+      poly.push([Math.cos(a) * w * 0.5 * jag, Math.sin(a) * h * 0.5 * jag]);
+    }
+    const mid = (a0 + a1) / 2, sp = rand(260, 520);
+    FR.push({ poly, im, w, h, x: cx, y: cy, vx: Math.cos(mid) * sp, vy: Math.sin(mid) * sp - 140, rot: 0, vr: rand(-7, 7), life: 1.3, max: 1.3 });
+  }
+}
+function updLocal(dt) {
+  for (let i = LP.length - 1; i >= 0; i--) {
+    const p = LP[i];
+    p.life -= dt;
+    if (p.life <= 0) { LP.splice(i, 1); continue; }
+    p.vx *= Math.exp(-p.drag * dt); p.vy *= Math.exp(-p.drag * dt);
+    p.vy += p.grav * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+  }
+  for (let i = FR.length - 1; i >= 0; i--) {
+    const f = FR[i];
+    f.life -= dt;
+    if (f.life <= 0) { FR.splice(i, 1); continue; }
+    f.vy += 900 * dt; f.vx *= Math.exp(-0.6 * dt);
+    f.x += f.vx * dt; f.y += f.vy * dt; f.rot += f.vr * dt;
+  }
+}
+function drawLocal(c) {
+  // shell fragments
+  for (const f of FR) {
+    const k = f.life / f.max;
+    c.save(); c.globalAlpha = Math.min(1, k * 2.5);
+    c.translate(f.x, f.y); c.rotate(f.rot);
+    c.beginPath(); f.poly.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.closePath();
+    c.save(); c.clip(); c.drawImage(f.im, -f.w / 2, -f.h / 2, f.w, f.h); c.restore();
+    c.strokeStyle = 'rgba(255,250,235,0.35)'; c.lineWidth = 1.2; c.stroke();
+    c.restore();
+  }
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  for (const p of LP) {
+    const k = p.life / p.max;
+    if (p.kind === 'ring') {
+      const r = p.size * ease.outCubic(1 - k), bw = Math.max(10, r * 0.16);
+      if (r < 2) continue;
+      const g = c.createRadialGradient(p.x, p.y, Math.max(0, r - bw), p.x, p.y, r + bw);
+      g.addColorStop(0, rgba(p.color, 0)); g.addColorStop(0.5, rgba(p.color, 0.38 * k)); g.addColorStop(1, rgba(p.color, 0));
+      c.fillStyle = g; c.beginPath(); c.arc(p.x, p.y, r + bw, 0, TAU); c.fill();
+    } else if (p.kind === 'bloom') {
+      const r = p.size * (0.6 + 0.4 * (1 - k));
+      const g = c.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+      g.addColorStop(0, rgba('#ffffff', 0.85 * k)); g.addColorStop(0.18, rgba(p.color, 0.55 * k)); g.addColorStop(1, rgba(p.color, 0));
+      c.fillStyle = g; c.beginPath(); c.arc(p.x, p.y, r, 0, TAU); c.fill();
+    } else if (p.kind === 'bubble') {
+      c.globalCompositeOperation = 'source-over';
+      c.globalAlpha = Math.min(1, k * 1.5) * 0.9;
+      const s = p.size * 2.2;
+      c.drawImage(bubbleSprite(), p.x - s, p.y - s, s * 2, s * 2);
+      c.globalAlpha = 1;
+      c.globalCompositeOperation = 'lighter';
+    } else if (p.kind === 'ember') {
+      c.globalAlpha = Math.min(1, k * 1.6) * (0.6 + 0.4 * Math.sin(R.t * 30 + p.x));
+      c.strokeStyle = p.color; c.lineWidth = p.size; c.lineCap = 'round';
+      c.beginPath(); c.moveTo(p.x, p.y); c.lineTo(p.x - p.vx * 0.03, p.y - p.vy * 0.03); c.stroke();
+      c.globalAlpha = Math.min(1, k * 1.2) * 0.5;
+      const s = p.size * 5;
+      c.drawImage(glowSprite(p.color), p.x - s, p.y - s, s * 2, s * 2);
+    } else {
+      c.globalAlpha = Math.min(1, k * 1.5);
+      const s = p.size * (2.5 + k * 1.5);
+      c.drawImage(glowSprite(p.color), p.x - s, p.y - s, s * 2, s * 2);
+    }
+  }
+  c.restore();
+  c.globalAlpha = 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -106,12 +257,20 @@ function drawEggAt(c, x, y, size, opt = {}) {
 
 function rays(c, x, y, col, a, n = 14, spin = 0.3, w = 0.08) {
   c.save(); c.globalCompositeOperation = 'lighter';
+  const L = Math.max(R.W, R.H) * 0.95;
+  const g = c.createRadialGradient(x, y, 0, x, y, L);
+  g.addColorStop(0, rgba(col, a * 2.2)); g.addColorStop(0.35, rgba(col, a)); g.addColorStop(1, rgba(col, 0));
+  c.fillStyle = g;
   for (let i = 0; i < n; i++) {
-    const ang = (i / n) * TAU + R.t * spin;
-    c.fillStyle = rgba(col, a);
-    c.beginPath(); c.moveTo(x, y); c.arc(x, y, Math.max(R.W, R.H), ang - w, ang + w); c.closePath(); c.fill();
+    const ang = (i / n) * TAU + R.t * spin + Math.sin(R.t * 0.7 + i) * 0.05;
+    const ww = w * (0.6 + 0.4 * Math.sin(i * 7.3 + R.t));
+    c.globalAlpha = 0.55 + 0.45 * Math.sin(R.t * 1.3 + i * 2.1);
+    c.beginPath(); c.moveTo(x, y); c.arc(x, y, L, ang - ww, ang + ww); c.closePath(); c.fill();
+    c.globalAlpha *= 0.5;
+    c.beginPath(); c.moveTo(x, y); c.arc(x, y, L, ang - ww * 2.2, ang + ww * 2.2); c.closePath(); c.fill();
   }
   c.restore();
+  c.globalAlpha = 1;
 }
 
 function aura(c, x, y, rad, col, a) {
@@ -126,13 +285,13 @@ export function drawCreatureCard(c, k) {
   const im = creatureImg(it.def.id, it.inst.mut);
   const cx = R.W / 2, cy = R.H * 0.38;
   const app = ease.outBack(clamp(k, 0, 1));
-  if (r >= 2) rays(c, cx, cy, col, 0.06 + r * 0.01, 10 + r * 2, 0.25 + r * 0.04, 0.05 + r * 0.004);
+  if (r >= 2) rays(c, cx, cy, col, (SHADER[RV.anim] ? 0.03 : 0.06) + r * 0.008, 10 + r * 2, 0.25 + r * 0.04, 0.05 + r * 0.004);
   if (r >= 7) rays(c, cx, cy, '#ffffff', 0.05, 7, -0.4, 0.03);
-  aura(c, cx, cy, R.W * (0.45 + r * 0.03), col, 0.35 + r * 0.04);
+  aura(c, cx, cy, R.W * (0.45 + r * 0.03), col, (SHADER[RV.anim] ? 0.18 : 0.35) + r * 0.03);
   if (it.inst.mut) {
     const m = MUT_BY_ID[it.inst.mut];
     aura(c, cx, cy, R.W * 0.4, it.inst.mut === 'iridescent' ? hsl((R.t * 120) % 360, 90, 65) : m.color, 0.3);
-    if (Math.random() < 0.4) spark(cx + rand(-1, 1) * R.W * 0.35, cy + rand(-1, 1) * 70, { scr: true, color: m.color, speed: 30, life: 1, size: 2 });
+    if (Math.random() < 0.4) spark(cx + rand(-1, 1) * R.W * 0.35, cy + rand(-1, 1) * 70, { color: m.color, speed: 30, life: 1, size: 2 });
   }
   if (!im) return;
   const maxW = R.W * 0.86, maxH = R.H * 0.26;
@@ -143,7 +302,7 @@ export function drawCreatureCard(c, k) {
   c.drawImage(im, -w / 2, -h / 2, w, h);
   c.restore();
   // ambient sparkle
-  if (Math.random() < 0.25 + r * 0.05) spark(cx + rand(-1, 1) * w * 0.5, cy + rand(-1, 1) * h * 0.5, { scr: true, color: RARITIES[r].glow, speed: 20, life: 0.8, size: 1.8 });
+
 }
 
 // ---------------------------------------------------------------------------
@@ -161,21 +320,15 @@ A[0] = (c, k, cx, cy) => {
 // 1 Bubble Burst
 A[1] = (c, k, cx, cy) => {
   const w = seg(k, 0, 1);
-  if (Math.random() < 0.5) spark(cx + rand(-60, 60), cy + 80, { scr: true, vx: rand(-10, 10), vy: rand(-160, -60), color: '#bff', size: rand(2, 5), life: 1, drag: 0.5, glow: false });
+  if (Math.random() < 0.5) spark(cx + rand(-60, 60), cy + 80, { kind: 'bubble', vx: rand(-10, 10), vy: rand(-160, -60), size: rand(2, 5), life: 1.2, drag: 0.5 });
   drawEggAt(c, cx, cy, E(), { scale: 1 + ease.inCubic(w) * 0.35, shake: w * 3, glow: climbColor(w), crack: w > 0.7 ? (w - 0.7) * 3 : 0 });
-  c.strokeStyle = 'rgba(200,255,255,0.6)'; c.lineWidth = 2;
-  c.beginPath(); c.arc(cx, cy, E() * (0.75 + w * 0.3), 0, TAU); c.stroke();
-};
-// 2 Ink Bloom
-A[2] = (c, k, cx, cy) => {
-  const w = seg(k, 0, 1);
-  drawEggAt(c, cx, cy, E(), { shake: w * 4, glow: climbColor(w), crack: w });
-  const rnd = seeded(RV.seed);
-  c.fillStyle = `rgba(5,3,10,${0.85 * ease.outCubic(w)})`;
-  for (let i = 0; i < 14; i++) {
-    const a = rnd() * TAU, d = rnd() * 60 * w;
-    c.beginPath(); c.arc(cx + Math.cos(a) * d, cy + Math.sin(a) * d, (20 + rnd() * 60) * ease.outCubic(w), 0, TAU); c.fill();
-  }
+  const br = E() * (0.75 + w * 0.3);
+  const bg = c.createRadialGradient(cx, cy, br * 0.82, cx, cy, br);
+  bg.addColorStop(0, 'rgba(190,245,255,0.03)'); bg.addColorStop(0.85, 'rgba(200,250,255,0.22)'); bg.addColorStop(1, 'rgba(230,255,255,0)');
+  c.fillStyle = bg; c.beginPath(); c.arc(cx, cy, br, 0, TAU); c.fill();
+  const sp = c.createRadialGradient(cx - br * 0.45, cy - br * 0.5, 0, cx - br * 0.45, cy - br * 0.5, br * 0.25);
+  sp.addColorStop(0, 'rgba(255,255,255,0.6)'); sp.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = sp; c.beginPath(); c.arc(cx - br * 0.45, cy - br * 0.5, br * 0.25, 0, TAU); c.fill();
 };
 // 3 Tide Spin
 A[3] = (c, k, cx, cy) => {
@@ -224,37 +377,6 @@ A[6] = (c, k, cx, cy) => {
   c.restore();
   drawEggAt(c, cx, cy, E(), { rot: w * w * 20, scale: 1 - ease.inCubic(w) * 0.6, glow: climbColor(w) });
 };
-// 7 Stormcall
-A[7] = (c, k, cx, cy) => {
-  const w = seg(k, 0, 1);
-  c.fillStyle = `rgba(0,0,10,${0.5 * w})`; c.fillRect(0, 0, R.W, R.H);
-  [0.3, 0.6, 0.9].forEach((at, i) => fireAt(w, at, 'bolt' + i, () => { flash('#e0f0ff', 0.5); shake(6); sfxPlay('snap'); RV['bolt'] = R.t; }));
-  if (RV.bolt && R.t - RV.bolt < 0.15) {
-    c.strokeStyle = '#eef8ff'; c.lineWidth = 3; c.shadowColor = '#9cf'; c.shadowBlur = 20;
-    let x = cx + rand(-40, 40), y = 0; c.beginPath(); c.moveTo(x, y);
-    while (y < cy) { x += rand(-25, 25); y += rand(20, 40); c.lineTo(x + (cx - x) * (y / cy) * 0.3, y); }
-    c.stroke(); c.shadowBlur = 0;
-  }
-  drawEggAt(c, cx, cy, E(), { shake: w * 5, glow: climbColor(w), crack: w });
-};
-// 8 Coral Bloom
-A[8] = (c, k, cx, cy) => {
-  const w = seg(k, 0, 1);
-  drawEggAt(c, cx, cy, E(), { glow: climbColor(w), crack: seg(w, 0.6, 1), shake: w * 3 });
-  const rnd = seeded(RV.seed);
-  c.strokeStyle = rgba('#ff6f91', 0.85); c.lineCap = 'round';
-  const branch = (x, y, a, len, depth) => {
-    if (depth > 5 || len < 4) return;
-    const g = clamp(w * 6 - depth, 0, 1);
-    if (g <= 0) return;
-    const x2 = x + Math.cos(a) * len * g, y2 = y + Math.sin(a) * len * g;
-    c.lineWidth = 7 - depth;
-    c.beginPath(); c.moveTo(x, y); c.lineTo(x2, y2); c.stroke();
-    branch(x2, y2, a - 0.4 - rnd() * 0.3, len * 0.75, depth + 1);
-    branch(x2, y2, a + 0.4 + rnd() * 0.3, len * 0.75, depth + 1);
-  };
-  for (let i = 0; i < 5; i++) branch(cx + (i - 2) * 50, cy + 140, -Math.PI / 2 + (i - 2) * 0.25, 55, 0);
-};
 // 9 Lantern Swarm
 A[9] = (c, k, cx, cy) => {
   const w = seg(k, 0, 1);
@@ -267,23 +389,6 @@ A[9] = (c, k, cx, cy) => {
   }
   c.restore();
   drawEggAt(c, cx, cy, E(), { glow: climbColor(w), glowA: 0.3 + w, shake: w * 3, crack: seg(w, 0.5, 1) });
-};
-// 10 The Eye Opens
-A[10] = (c, k, cx, cy) => {
-  const w = seg(k, 0, 1);
-  const open = ease.outCubic(seg(w, 0.05, 0.6)) * (w > 0.9 ? 1 - (w - 0.9) * 10 : 1);
-  const ew = R.W * 0.48, eh = ew * 0.48 * open;
-  c.fillStyle = '#e9dcc0'; c.beginPath(); c.ellipse(cx, cy, ew, Math.max(0.5, eh), 0, 0, TAU); c.fill();
-  c.save(); c.beginPath(); c.ellipse(cx, cy, ew, Math.max(0.5, eh), 0, 0, TAU); c.clip();
-  c.strokeStyle = 'rgba(180,30,40,0.5)'; c.lineWidth = 1;
-  for (let i = 0; i < 12; i++) { c.beginPath(); c.moveTo(cx + (i % 2 ? 1 : -1) * ew, cy + (i - 6) * 6); c.quadraticCurveTo(cx, cy + (i - 6) * 10, cx + (i % 2 ? 0.4 : -0.4) * ew, cy); c.stroke(); }
-  const px = cx + Math.sin(R.t * 1.7) * 30 * (1 - w);
-  c.fillStyle = climbColor(w); c.beginPath(); c.arc(px, cy, ew * 0.38, 0, TAU); c.fill();
-  c.fillStyle = '#000'; c.beginPath(); c.ellipse(px, cy, ew * (0.09 - w * 0.06), ew * 0.32, 0, 0, TAU); c.fill();
-  c.restore();
-  if (w > 0.3) fire('hb1', () => sfxPlay('heartbeat'));
-  if (w > 0.7) fire('hb2', () => sfxPlay('heartbeat'));
-  drawEggAt(c, cx, cy, E() * 0.6, { glow: climbColor(w), shake: w * 4, crack: seg(w, 0.6, 1) });
 };
 // 11 The Grasp
 A[11] = (c, k, cx, cy) => {
@@ -383,25 +488,6 @@ A[15] = (c, k, cx, cy) => {
   fire('whisper', () => sfxPlay('whisper'));
   drawEggAt(c, cx, cy - Math.sin(w * Math.PI) * 30, E(), { glow: climbColor(w), glowA: 0.5 + w, crack: seg(w, 0.6, 1) });
 };
-// 16 The Maw
-A[16] = (c, k, cx, cy) => {
-  const w = seg(k, 0, 1);
-  drawEggAt(c, cx, cy, E(), { glow: climbColor(w), shake: w * 6, crack: w });
-  const close = ease.inCubic(seg(w, 0, 0.92));
-  const gap = lerp(R.H * 0.55, 0, close);
-  const drawJaw = (y, dir) => {
-    c.fillStyle = '#2a0a12'; c.fillRect(0, dir < 0 ? 0 : y, R.W, dir < 0 ? y : R.H - y);
-    c.fillStyle = '#efe4cc';
-    const n = 9;
-    for (let i = 0; i < n; i++) {
-      const tx = (i + 0.5) * (R.W / n), tl = 30 + ((i * 37) % 3) * 14;
-      c.beginPath(); c.moveTo(tx - 16, y); c.lineTo(tx, y - dir * tl); c.lineTo(tx + 16, y); c.fill();
-    }
-  };
-  drawJaw(cy - gap / 2, -1);
-  drawJaw(cy + gap / 2, 1);
-  fire('gr', () => sfxPlay('growl'));
-};
 // 17 Void Collapse
 A[17] = (c, k, cx, cy) => {
   const w = seg(k, 0, 1);
@@ -448,40 +534,130 @@ A[18] = (c, k, cx, cy) => {
   }
   drawEggAt(c, cx, cy, E() * 0.75, { glow: col, crack: seg(w, 0.66, 1), shake: seg(w, 0.66, 1) * 6 });
 };
-// 19 THE AWAKENING
-A[19] = (c, k, cx, cy) => {
-  const w = seg(k, 0, 1);
-  c.fillStyle = `rgba(0,0,0,${0.8 * w})`; c.fillRect(0, 0, R.W, R.H);
-  const rnd = seeded(RV.seed);
-  // eyes open around the screen
-  for (let i = 0; i < 14; i++) {
-    const ex = rnd() * R.W, ey = rnd() * R.H, es = 12 + rnd() * 26;
-    const o = ease.outCubic(seg(w, i * 0.04, i * 0.04 + 0.2));
-    if (o <= 0) continue;
-    c.fillStyle = '#e9dcc0'; c.beginPath(); c.ellipse(ex, ey, es, es * 0.45 * o, 0, 0, TAU); c.fill();
-    c.fillStyle = climbColor(w); c.beginPath(); c.arc(ex + (cx - ex) * 0.02, ey, es * 0.35 * o, 0, TAU); c.fill();
-    c.fillStyle = '#000'; c.beginPath(); c.ellipse(ex + (cx - ex) * 0.03, ey, 2, es * 0.3 * o, 0, 0, TAU); c.fill();
-    fire('eye' + i, () => sfxPlay('crack'));
+// ---------------------------------------------------------------------------
+// High-end reveals (shader backdrops from gl.js + 2D foreground)
+// ---------------------------------------------------------------------------
+const tintCache = new Map();
+function tinted(im, col, a) {
+  const q = Math.round(a * 20) / 20;
+  const key = im.src + col + q;
+  if (tintCache.has(key)) return tintCache.get(key);
+  const cv = document.createElement('canvas');
+  cv.width = im.naturalWidth; cv.height = im.naturalHeight;
+  const g = cv.getContext('2d');
+  g.drawImage(im, 0, 0);
+  g.globalCompositeOperation = 'source-atop';
+  g.fillStyle = rgba(col, q); g.fillRect(0, 0, cv.width, cv.height);
+  if (tintCache.size > 60) tintCache.clear();
+  tintCache.set(key, cv);
+  return cv;
+}
+
+// 20 Black Tide
+A[20] = (c, k, cx, cy) => {
+  if (k > 0.25) fire('wh', () => sfxPlay('whisper'));
+  drawEggAt(c, cx, cy, E(), { glow: climbColor(k), glowA: 0.35 + k * 0.6, shake: seg(k, 0.65, 1) * 6, crack: seg(k, 0.55, 1) });
+};
+// 21 Thunderhead
+A[21] = (c, k, cx, cy) => {
+  [0.2, 0.42, 0.6, 0.74, 0.86, 0.95].forEach((at, i) => fireAt(k, at, 'st' + i, () => {
+    const x0 = rand(0.1, 0.9) * R.W;
+    const hitEgg = i >= 2;
+    const tx = hitEgg ? cx + rand(-8, 8) : rand(0.05, 0.95) * R.W;
+    const ty = hitEgg ? cy - E() * 0.38 : R.H * rand(0.55, 0.85);
+    RV.bolts.push({ b: makeBolt(x0, -20, tx, ty, 2), t: 0 });
+    RV.flash = 1; RV.flashX = x0 / R.W;
+    sfxPlay('snap'); setTimeout(() => sfxPlay('bump'), 120 + rand(0, 200));
+    shake(hitEgg ? 7 : 4); vibrate(25);
+  }));
+  drawEggAt(c, cx, cy, E(), { glow: RV.flash > 0.3 ? '#cfe4ff' : climbColor(k), glowA: 0.4 + RV.flash, shake: seg(k, 0.6, 1) * 5, crack: seg(k, 0.5, 1), crackCol: '#e8f2ff' });
+};
+// 22 Caustic Bloom
+A[22] = (c, k, cx, cy) => {
+  if (Math.random() < 0.55) spark(cx + rand(-0.5, 0.5) * R.W, R.H * rand(0.7, 1.05), { kind: 'bubble', vx: rand(-8, 8), vy: rand(-140, -60), size: rand(1.5, 4.5), life: rand(1.4, 2.4), drag: 0.2 });
+  drawEggAt(c, cx, cy + Math.sin(R.t * 2) * 4, E(), { glow: climbColor(k), glowA: 0.4 + k * 0.5, crack: seg(k, 0.6, 1), shake: seg(k, 0.75, 1) * 4 });
+};
+// 23 Hydrothermal Eruption
+A[23] = (c, k, cx, cy) => {
+  const vy = cy + R.H * 0.6;
+  for (let i = 0; i < 3; i++) if (Math.random() < 0.3 + k) spark(cx + rand(-14, 14) * (1 + k), vy - rand(0, 30), { kind: 'ember', color: Math.random() < 0.3 ? '#ffe2a0' : '#ff7a1a', vx: rand(-40, 40), vy: rand(-420, -220) * (0.7 + k), size: rand(1, 2.4), life: rand(0.8, 1.6), drag: 0.4 });
+  if (k > 0.3) fire('rum', () => sfxPlay('tentacle'));
+  drawEggAt(c, cx, cy, E(), { glow: k < 0.5 ? '#ff7a1a' : climbColor(k), glowA: 0.4 + k * 0.6, shake: 1 + k * 6, crack: seg(k, 0.5, 1), crackCol: '#ffcf80' });
+};
+// 24 Bioluminescent Swarm
+A[24] = (c, k, cx, cy) => {
+  if (!RV.plank) {
+    const rnd = seeded(RV.seed);
+    RV.plank = Array.from({ length: 420 }, () => ({ a: rnd() * TAU, r: 60 + rnd() * Math.max(R.W, R.H) * 0.75, sp: (0.2 + rnd() * 0.6) * (rnd() < 0.5 ? 1 : -1), ph: rnd() * TAU, s: 0.8 + rnd() * 1.8, c: rnd() < 0.75 ? '#5effd6' : '#8fd8ff' }));
   }
-  // glass cracks across the screen
-  const cr = seg(w, 0.5, 1);
-  if (cr > 0) {
-    c.strokeStyle = rgba('#ffffff', 0.8); c.lineWidth = 1.5;
-    for (let i = 0; i < 10 * cr; i++) {
-      let x = cx, y = cy; const a = (i / 10) * TAU + rnd();
-      c.beginPath(); c.moveTo(x, y);
-      for (let s = 0; s < 8; s++) { x += Math.cos(a + (rnd() - 0.5)) * 45; y += Math.sin(a + (rnd() - 0.5)) * 45; c.lineTo(x, y); }
-      c.stroke();
-    }
+  const col = climbColor(k);
+  const conv = ease.inCubic(k);
+  c.save(); c.globalCompositeOperation = 'lighter';
+  for (const p of RV.plank) {
+    const rr = p.r * (1 - conv * 0.88) + Math.sin(R.t * 2 + p.ph) * 6;
+    const a = p.a + R.t * p.sp * (1 + k * 3) + Math.sin(R.t + p.ph) * 0.1;
+    const x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr * 0.85;
+    const tw = 0.45 + 0.55 * Math.abs(Math.sin(R.t * 3 + p.ph));
+    c.globalAlpha = tw;
+    const s = p.s * 3.2;
+    c.drawImage(glowSprite(k > 0.6 && p.s > 2 ? col : p.c), x - s, y - s, s * 2, s * 2);
   }
-  // chromatic split egg
-  c.save(); c.globalCompositeOperation = 'lighter'; c.globalAlpha = 0.5;
-  drawEggAt(c, cx - w * 8, cy, E(), { alpha: 0.5, shake: w * 8 });
-  drawEggAt(c, cx + w * 8, cy, E(), { alpha: 0.5, shake: w * 8 });
-  c.restore();
-  drawEggAt(c, cx, cy, E(), { glow: hsl((R.t * 200) % 360, 100, 65), glowA: w, shake: w * 9, crack: w });
-  if (w > 0.2) fire('a1', () => sfxPlay('tentacle'));
-  if (w > 0.55) fire('a2', () => { sfxPlay('whisper'); shake(8); });
+  c.restore(); c.globalAlpha = 1;
+  drawEggAt(c, cx, cy, E(), { glow: col, glowA: 0.3 + k * 0.7, crack: seg(k, 0.6, 1), shake: seg(k, 0.8, 1) * 4 });
+};
+// 25 Event Horizon
+A[25] = (c, k, cx, cy) => {
+  if (k > 0.35) fire('eh1', () => sfxPlay('heartbeat'));
+  if (k > 0.7) fire('eh2', () => { sfxPlay('heartbeat'); shake(5); });
+  const sc = Math.max(0.03, 1 - ease.inCubic(k) * 0.97);
+  const ang = k * k * 9;
+  const off = (1 - k) * 0;
+  drawEggAt(c, cx + Math.cos(ang) * off, cy, E(), { scale: sc, rot: ang, glow: '#ffffff', glowA: 0.2 + k * 0.5, alpha: 1 - seg(k, 0.9, 1) });
+};
+// 26 Leviathan's Gaze
+A[26] = (c, k, cx, cy) => {
+  if (k > 0.2) fire('g1', () => sfxPlay('heartbeat'));
+  if (k > 0.55) fire('g2', () => sfxPlay('whisper'));
+  if (k > 0.8) fire('g3', () => { sfxPlay('heartbeat'); shake(4); });
+  const vis = seg(k, 0.35, 0.6);
+  drawEggAt(c, cx, cy, E() * 0.36, { alpha: 0.25 + 0.6 * vis, glow: climbColor(k), glowA: 0.3 * vis, shake: seg(k, 0.85, 1) * 3 });
+};
+// 27 From Below
+A[27] = (c, k, cx, cy) => {
+  const lev = IMG.creatures.leviathan, tj = IMG.creatures.thornjaw;
+  const fog = '#03101a';
+  if (k < 0.62 && lev) {
+    const f = seg(k, 0, 0.62);
+    const w = R.W * 2.6, h = (w * lev.naturalHeight) / lev.naturalWidth;
+    const x = lerp(R.W + w * 0.55, -w * 0.55, f);
+    const y = cy + R.H * 0.26 + Math.sin(R.t * 1.1) * 8;
+    c.drawImage(tinted(lev, fog, 0.82), x - w / 2, y - h / 2, w, h);
+    if (k > 0.1) fire('pass', () => sfxPlay('growl'));
+  }
+  drawEggAt(c, cx, cy, E(), { glow: climbColor(k), glowA: 0.35 + k * 0.5, shake: seg(k, 0.6, 1) * 7, crack: seg(k, 0.6, 1) });
+  if (k >= 0.58 && tj) {
+    const f = ease.inCubic(seg(k, 0.58, 1));
+    const L = lerp(R.H * 0.8, R.H * 2.3, f);
+    const top = lerp(R.H + 40, cy - E() * 0.25 - L * 0.07, f);
+    const yc = top + L / 2;
+    const short = (L * tj.naturalHeight) / tj.naturalWidth;
+    c.save(); c.translate(cx, yc); c.rotate(Math.PI / 2);
+    c.drawImage(tinted(tj, fog, lerp(0.88, 0.15, f)), -L / 2, -short / 2, L, short);
+    c.restore();
+    fire('lunge', () => { sfxPlay('growl'); sfxPlay('tentacle'); });
+    if (f > 0.6) shake(3 + f * 6);
+  }
+};
+// 28 Abyssal Aurora
+A[28] = (c, k, cx, cy) => {
+  if (k > 0.15) fire('au', () => sfxPlay('omen'));
+  drawEggAt(c, cx, cy - Math.sin(k * Math.PI) * 18, E(), { glow: climbColor(k), glowA: 0.35 + k * 0.6, crack: seg(k, 0.6, 1), shake: seg(k, 0.8, 1) * 4 });
+};
+// 29 Shattered Reality
+A[29] = (c, k, cx, cy) => {
+  [0.15, 0.3, 0.45, 0.58, 0.7, 0.8, 0.88, 0.94].forEach((at, i) => fireAt(k, at, 'cr' + i, () => { sfxPlay('crack'); if (i > 4) shake(3 + i); }));
+  if (k > 0.5) fire('sw', () => sfxPlay('whisper'));
+  drawEggAt(c, cx, cy, E(), { glow: climbColor(k), glowA: 0.3 + k * 0.7, crack: k, shake: seg(k, 0.6, 1) * 7 });
 };
 
 function fireAt(w, at, key, fn) { if (w >= at) fire(key, fn); }
@@ -490,19 +666,40 @@ function fireAt(w, at, key, fn) { if (w >= at) fire(key, fn); }
 export function drawReveal(c, dt) {
   if (!RV.active) return;
   RV.t += dt;
+  updLocal(dt);
+  RV.flash *= Math.exp(-dt * 7);
   const k = clamp(RV.t / RV.dur, 0, 1);
   const cx = R.W / 2, cy = R.H * 0.4;
-  // dim backdrop
-  c.fillStyle = 'rgba(2,3,8,0.78)'; c.fillRect(0, 0, R.W, R.H);
-  // label of the reveal style
   const hk = RV.hatchK;
+  const kb = Math.min(1, k / hk);
+  if (k >= hk) RV.hT += dt;
+  const sh = SHADER[RV.anim];
+  let drewBg = false;
+  if (sh) {
+    const cvs = renderFX(sh[0], { W: R.W, H: R.H, cx, cy, t: R.t, k: kb, h: RV.hT, col: climbColor(kb), flash: RV.flash, flashX: RV.flashX }, sh[1]);
+    if (cvs) { c.drawImage(cvs, 0, 0, R.W, R.H); drewBg = true; }
+  }
+  if (!drewBg) {
+    c.fillStyle = 'rgba(2,3,8,0.8)'; c.fillRect(0, 0, R.W, R.H);
+    if (sh) aura(c, cx, cy, R.W * 0.6, climbColor(kb), 0.25 + kb * 0.3);
+  }
+  // lightning lives above the clouds but is drawn over the egg
   if (k < hk) {
-    A[RV.anim](c, k / hk, cx, cy);
+    A[RV.anim](c, kb, cx, cy);
+    for (const bo of RV.bolts) {
+      bo.t += dt;
+      const t = bo.t;
+      const inten = t < 0.05 ? 1 : t < 0.09 ? 0.25 : t < 0.15 ? 1 : Math.max(0, 1 - (t - 0.15) / 0.25);
+      drawBolt(c, bo.b, inten, '#8fb8ff');
+    }
+    drawLocal(c);
     c.font = '600 13px Georgia'; c.textAlign = 'center'; c.fillStyle = 'rgba(230,220,200,0.5)';
     c.fillText(EGGS[RV.item.tier - 1].name.toUpperCase() + ' · ' + REVEALS[RV.anim].toUpperCase(), cx, R.H * 0.74);
     c.fillText('tap to skip', cx, R.H * 0.92);
   } else {
     fire('hatch', hatchMoment);
+    if (!sh) { c.fillStyle = 'rgba(2,3,8,0.15)'; c.fillRect(0, 0, R.W, R.H); }
+    drawLocal(c);
     drawCreatureCard(c, (k - hk) / (1 - hk) * 2.2);
   }
   if (k >= 1 && !RV.held) {

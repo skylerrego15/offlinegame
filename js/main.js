@@ -11,6 +11,7 @@ import { initUI, updateUI, revealTap, openPanelFor, showOffline } from './ui.js'
 import { clamp, TAU, mixHex, rgba } from './util.js';
 import { EGGS } from './data.js';
 import { drawCage } from './cage.js';
+import { initGL } from './gl.js';
 import { S as _S } from './state.js';
 
 const cv = document.getElementById('cv');
@@ -29,6 +30,8 @@ function resize() {
   layoutShip();
 }
 window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 200));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 
 // ---------------------------------------------------------------------------
 // camera
@@ -123,6 +126,8 @@ function frame(now) {
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
   last = now;
   R.t += dt;
+  // keep the canvas exactly matched to the visible app area (fixes off-centre drawing on phones)
+  if (app.clientWidth !== R.W || app.clientHeight !== R.H) resize();
   try {
     fxUpdate(dt);
     const gdt = isStopped() ? 0 : dt;
@@ -209,6 +214,7 @@ window.addEventListener('pagehide', save);
 async function boot() {
   const had = load();
   resize();
+  initGL();
   const bar = document.getElementById('loadFill');
   await loadAssets((p) => (bar.style.width = Math.round(p * 100) + '%'));
   ensureContracts();

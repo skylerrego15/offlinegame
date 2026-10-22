@@ -1,5 +1,7 @@
 import { R } from './rt.js';
 import { rand, TAU, clamp, ease, hsl, rgba } from './util.js';
+import { makeBolt, drawBolt } from './bolt.js';
+let comboBolts = [], boltAt = 0;
 
 const parts = [];
 const texts = [];
@@ -220,14 +222,13 @@ function drawCombo(c, W, H) {
     c.restore();
   }
   // L8+: lightning cracks
-  if (L >= 8 && Math.random() < 0.6) {
-    c.strokeStyle = rgba('#ffffff', 0.9 * k); c.lineWidth = 2;
-    for (let j = 0; j < 3; j++) {
-      let x = Math.random() * W, y = 0;
-      c.beginPath(); c.moveTo(x, y);
-      while (y < H) { x += rand(-30, 30); y += rand(20, 50); c.lineTo(x, y); }
-      c.stroke();
+  if (L >= 8) {
+    if (R.t - boltAt > 0.16) {
+      boltAt = R.t;
+      comboBolts = [0, 1].map(() => makeBolt(rand(0.1, 0.9) * W, -20, combo.x + rand(-40, 40), combo.y + rand(-30, 30), 2));
     }
+    const fl = 0.55 + 0.45 * Math.random();
+    for (const b of comboBolts) drawBolt(c, b, k * fl, L >= 9 ? '#c79bff' : '#8fb8ff');
   }
   // combo text
   const size = 44 + Math.min(L, 8) * 3;

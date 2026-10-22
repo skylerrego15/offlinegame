@@ -9,7 +9,7 @@ A Lovecraftian deep-sea egg-harpooning game for phones. It plays fully offline o
 2. **Steer the dive** by dragging anywhere on screen. The harpoon follows your finger and sinks at a steady speed. Chain eggs within 40m of each other: a chain of *N* multiplies your line range by *N²*, so 2 eggs = 4× range, 3 = 9×, and so on. Each combo level gets louder visuals.
    Every egg you hit drops into your cage. There's no limit, and eggs are only collected on the way down.
 3. **Reel in** with the 0–100% power bar. Past the gold SAFE mark the line strains and snaps barbs, which loses eggs. Reel too slowly and something rises out of the dark to take an egg. Holding just under SAFE builds bonus hatch luck.
-4. **Hatch your haul.** There are 8 egg tiers, 20 reveal animations that escalate with rarity, 8 rarities, and 7 mutations. Sell a creature for cash now or keep it in your aquarium for money per second.
+4. **Hatch your haul.** There are 8 egg tiers, 24 reveal animations that escalate with rarity (10 of them rendered with WebGL shaders: ink, storms, caustics, vents, plankton, a black hole, a living eye, a monster from below, aurora, shattering reality), 8 rarities, and 7 mutations. Sell a creature for cash now or keep it in your aquarium for money per second.
 5. **Grow the ship.** Every room you build appears in the hull cutaway, with your hired crew working in it.
 
 ## Systems

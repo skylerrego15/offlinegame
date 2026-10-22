@@ -8,6 +8,7 @@ import { UPGRADES, CREW, ROOMS, CREATURES, CREATURE_BY_ID, RARITIES, MUTATIONS, 
 import { creatureURL, eggURL } from './assets.js';
 import { CAGES, cageIcon, cageBonuses } from './cage.js';
 import { VERSION } from './version.js';
+import { snapshot } from './gl.js';
 import { money, fmt, meters, clamp } from './util.js';
 import {
   hatch, sellInst, keepInst, weakestFish, sellAquarium, buyUpgrade, hireCrew, buildRoom, startReel, toShip,
@@ -223,6 +224,7 @@ function visit(on) {
 // ---------------------------------------------------------------------------
 let queue = [], qi = 0, cur = null;
 function startHaul() {
+  try { snapshot(document.getElementById('cv')); } catch (e) {}
   queue = R.haul.slice(); qi = 0;
   nextEgg();
 }

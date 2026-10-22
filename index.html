@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#05070d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Drowned Clutch">
+<title>Drowned Clutch</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="assets/icons/icon180.png">
+<link rel="icon" href="assets/icons/icon192.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="cv"></canvas>
+
+  <div id="hud">
+    <div class="hud-row">
+      <div class="pill money"><span class="coin">⛁</span><div><b id="moneyV">$0</b><small id="incomeV"></small></div></div>
+      <div class="pill dread" id="dreadPill"><span class="eye">◉</span><div class="dbar"><i id="dreadBar"></i></div><b id="dreadV">0</b></div>
+      <div class="sigil" id="sigilV"></div>
+    </div>
+    <div id="omenChip" class="chip hidden"></div>
+  </div>
+
+  <div id="diveHud" class="hidden">
+    <div id="depthBox"><div id="depthV">0m</div><div id="zoneV"></div><div id="maxV"></div><div id="luckV"></div><div id="comboV"></div></div>
+    <div id="lineBar"><i id="lineFill"></i></div>
+    <div id="eggSlots" class="slots"></div>
+    <div id="shieldV"></div>
+    <button id="reelBtn" class="btn reel">REEL IN</button>
+  </div>
+
+  <div id="reelHud" class="hidden">
+    <div id="tension"><div class="lbl">LINE TENSION</div><div class="tbar"><i id="tensionFill"></i></div></div>
+    <div id="lurkWarn" class="hidden">▲ SOMETHING FOLLOWS · <b id="lurkV"></b></div>
+    <div id="reelEggs" class="slots"></div>
+    <div id="powerBar"><div class="lbl">REEL<br>POWER</div><div id="powerTrack"><i id="powerFill"></i><span id="powerSafe"></span><div id="powerKnob"><b id="powerV">50%</b></div></div></div>
+    <div id="reelDepth"></div>
+  </div>
+
+  <div id="shipHud">
+    <button id="fireBtn"><span>⇣ HARPOON</span><small>hold · slide to aim · release</small></button>
+    <nav id="nav">
+      <button data-panel="upgrades"><i>⚓</i>Armory</button>
+      <button data-panel="crew"><i>☠</i>Crew</button>
+      <button data-panel="ship"><i>⚒</i>Ship</button>
+      <button data-panel="aquarium"><i>◈</i>Tanks</button>
+      <button data-panel="codex"><i>✥</i>Bestiary</button>
+      <button data-panel="contracts"><i>✎</i>Jobs</button>
+      <button data-panel="menu"><i>☰</i>Log</button>
+    </nav>
+  </div>
+
+  <div id="banner" class="hidden"><small id="bannerSmall"></small><b id="bannerBig"></b><em id="bannerLore"></em></div>
+  <div id="toasts"></div>
+  <div id="tip" class="hidden"></div>
+
+  <div id="card" class="hidden">
+    <div id="cardBadge" class="badge hidden"></div>
+    <div id="cardRar" class="rar"></div>
+    <h2 id="cardName"></h2>
+    <div id="cardTags"></div>
+    <div id="cardStats"></div>
+    <div class="cbtn">
+      <button id="cardSell" class="btn sell">SELL</button>
+      <button id="cardKeep" class="btn keep">KEEP</button>
+    </div>
+    <div class="cfoot"><span id="cardCount"></span><span id="cardStyle"></span><button id="cardRest" class="link">sell rest</button></div>
+  </div>
+
+  <button id="visitBtn" class="hidden">STRIKE IT!</button>
+
+  <div id="sheet" class="hidden">
+    <div class="sheet-head"><h2 id="sheetTitle"></h2><button id="sheetClose">✕</button></div>
+    <div id="sheetBody"></div>
+  </div>
+  <div id="modal" class="hidden"></div>
+
+  <div id="loading">
+    <div class="title"><small>a lovecraftian deep-sea egg harvest</small><h1>DROWNED<br>CLUTCH</h1></div>
+    <div class="lbar"><i id="loadFill"></i></div>
+    <p id="loadMsg">waking the deep…</p>
+    <button id="loadGo" class="btn hidden">DESCEND</button>
+  </div>
+</div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

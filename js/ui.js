@@ -43,6 +43,7 @@ export function initUI() {
   E.reelBtn.addEventListener('click', () => { if (R.mode === 'dive' && R.hp && R.hp.phase !== 'air') startReel('manual'); });
   E.visitBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); tapVisit(); });
   E.tip.addEventListener('click', () => E.tip.classList.add('hidden'));
+  E.dreadPill.addEventListener('click', () => { sfxPlay('ui'); dreadInfo(); });
 
   // hold-to-aim harpoon button
   let aimX = 0, aimA = 0, aimId = null;
@@ -69,7 +70,7 @@ export function initUI() {
     E.fireBtn.classList.remove('held');
     if (e.type === 'pointercancel') { R.mode = 'ship'; return; }
     fireHarpoon();
-    if (S.tut < 2) { tip('Touch the LEFT or RIGHT side to steer. Chain eggs back to back — every combo multiplies your range!'); S.tut = 2; }
+    if (S.tut < 2) { tip('Drag left and right anywhere on screen — the harpoon follows your finger. Chain eggs back to back: every combo multiplies your range!'); S.tut = 2; }
   };
   E.fireBtn.addEventListener('pointerup', release);
   E.fireBtn.addEventListener('pointercancel', release);
@@ -373,7 +374,7 @@ function pUpgrades() {
 function pCrew() {
   const st = stats();
   const tot = crewTotal();
-  let h = `<p class="sub">Beds <b>${tot}/${st.crewCap}</b> · crew efficiency <b>${Math.round(st.eff * 100)}%</b>${st.eff < 1 ? ' (Dread is shaking them)' : ''}</p>`;
+  let h = `<p class="sub">Beds <b>${tot}/${st.crewCap}</b> · crew efficiency <b>${Math.round(st.eff * 100)}%</b>${st.eff < 1 ? ' (Dread is shaking them)' : ''} · <a class="link" data-act="dread">what is Dread?</a></p>`;
   for (const c of CREW) {
     h += `<div class="row"><div class="ic dot" style="background:${c.color}"></div><div class="info"><b>${c.name}</b> <small>x${S.crew[c.id]}</small><br><span>${c.desc}</span></div>
     ${tot >= st.crewCap ? '<button class="buy" disabled>NO BEDS</button>' : costBtn('crew', c.id, crewCost(c.id), 'HIRE')}</div>`;
@@ -472,6 +473,7 @@ function onSheetClick(e) {
     case 'room': if (buildRoom(id)) { flashBtn(b); toast('New room built', '#ffd34d'); } break;
     case 'sellfish': { const v = sellAquarium(+id); toast('Sold for ' + money(v), '#ffd34d'); break; }
     case 'codex': codexDetail(id); return;
+    case 'dread': dreadInfo(); return;
     case 'claim': claimContract(id); break;
     case 'reroll': rerollContract(id); break;
     case 'offer':
@@ -507,6 +509,21 @@ function onSheetChange(e) {
 function flashBtn(b) {
   const r = b.getBoundingClientRect();
   burst(r.left + r.width / 2, r.top + r.height / 2, 14, { scr: true, color: '#ffd34d', speed: 140, life: 0.5 });
+}
+
+function dreadInfo() {
+  const st = stats();
+  const rate = st.dreadRate;
+  E.modal.innerHTML = `<div class="mbox" style="--rc:#c0182f"><h3>◉ Dread · ${Math.floor(S.dread)}/100</h3>
+  <p>Dread is how much <b>the deep has noticed your ship</b>.</p>
+  <p class="dl"><b>It goes up when you:</b><br>· hatch Epic or rarer creatures (rarer = more)<br>· swim past a watching eye<br>· dive below Zone 13<br>· employ Occultists</p>
+  <p class="dl"><b>It goes down:</b><br>· slowly on its own<br>· faster with Chaplains and Lantern Shrines<br>· when you fight off a tentacle</p>
+  <p class="dl"><b>Why you might want some:</b> every point gives <b style="color:#9dffc8">+0.4% hatch luck</b> (you have +${(S.dread * 0.4).toFixed(0)}% now).</p>
+  <p class="dl"><b>Why too much hurts:</b><br>· above <b>60</b>, your crew get shaken and work slower (down to 60%)<br>· at <b>80+</b>, tentacles climb the hull to drag creatures out of your aquarium. Tap them fast to fight them off.</p>
+  <p class="note">Right now it's ${rate > 0 ? `<b style="color:#ff4d6d">rising ${(rate * 60).toFixed(1)}</b>` : `<b style="color:#9dffc8">falling ${(-rate * 60).toFixed(1)}</b>`} per minute.</p>
+  <button class="btn" data-close>got it</button></div>`;
+  E.modal.classList.remove('hidden');
+  E.modal.onclick = (e) => { if (e.target === E.modal || e.target.closest('[data-close]')) E.modal.classList.add('hidden'); };
 }
 
 export function openPanelFor(roomType) {

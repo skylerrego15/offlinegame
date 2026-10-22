@@ -167,7 +167,7 @@ cv.addEventListener('pointerdown', (e) => {
   ptr = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, pan: R.shipPan, moved: 0 };
   const lx = e.clientX - app.getBoundingClientRect().left;
   if (R.mode === 'reveal') revealTap();
-  if (R.mode === 'dive') R.steer = clamp((lx - R.W / 2) / (R.W * 0.22), -1, 1);
+  if (R.mode === 'dive') R.steerX = lx / R.PPM;
 });
 cv.addEventListener('pointermove', (e) => {
   if (!ptr || e.pointerId !== ptr.id) return;
@@ -175,13 +175,13 @@ cv.addEventListener('pointermove', (e) => {
   const dy = e.clientY - ptr.y;
   ptr.moved += Math.abs(e.clientX - ptr.x) + Math.abs(dy);
   ptr.x = e.clientX; ptr.y = e.clientY;
-  if (R.mode === 'dive') R.steer = clamp((lx - R.W / 2) / (R.W * 0.22), -1, 1);
+  if (R.mode === 'dive') R.steerX = lx / R.PPM;
   else if (R.mode === 'reel') R.power = clamp(R.power - dy / 320, 0, 1);
   else if (R.mode === 'ship') R.shipPan = ptr.pan - (e.clientY - ptr.sy);
 });
 const up = (e) => {
   if (!ptr || e.pointerId !== ptr.id) return;
-  if (R.mode === 'dive') R.steer = 0;
+  R.steerX = null;
   if (R.mode === 'ship' && ptr.moved < 10 && !R.panel) {
     const r = app.getBoundingClientRect();
     const wx = e.clientX - r.left, wy = e.clientY - r.top + R.camY - shipBob();

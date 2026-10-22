@@ -102,8 +102,8 @@ export function stats() {
   return {
     eff,
     range: 70 * Math.pow(1.16, u.range),
-    speed: 28 * Math.pow(1.1, u.speed) * (1 + 0.03 * c.gunner * eff),
-    steer: (1 + 0.12 * u.steer) * (1 + 0.02 * c.gunner * eff),
+    speed: Math.min(72, (24 + 1.4 * u.speed) * (1 + 0.02 * c.gunner * eff)),
+    steer: (1 + 0.1 * u.steer) * (1 + 0.02 * c.gunner * eff),
     capacity: 3 + u.barbs,
     safe: Math.min(0.94, 0.55 + 0.022 * u.winch + 0.03 * rWinch),
     reelBase,

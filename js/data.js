@@ -114,9 +114,9 @@ export function zoneAt(depth) {
 // upgrades ------------------------------------------------------------------
 export const UPGRADES = [
   { id: 'range', name: 'Harpoon Line', icon: '⇣', desc: 'Base dive depth', max: 40, base: 60, growth: 1.62, val: (l) => 70 * Math.pow(1.16, l), show: (v) => Math.floor(v) + 'm' },
-  { id: 'speed', name: 'Powder Charge', icon: '➶', desc: 'Harpoon dive speed', max: 30, base: 45, growth: 1.55, val: (l) => 28 * Math.pow(1.1, l), show: (v) => Math.floor(v) + ' m/s' },
-  { id: 'barbs', name: 'Barbed Tines', icon: '⋔', desc: 'Eggs the harpoon can carry', max: 12, base: 150, growth: 2.15, val: (l) => 3 + l, show: (v) => v + ' eggs' },
-  { id: 'steer', name: 'Rudder Fins', icon: '⇄', desc: 'Steering control while diving', max: 15, base: 80, growth: 1.7, val: (l) => 1 + 0.12 * l, show: (v) => v.toFixed(2) + 'x' },
+  { id: 'speed', name: 'Powder Charge', icon: '➶', desc: 'How fast the harpoon sinks (capped so you can still aim)', max: 30, base: 45, growth: 1.55, val: (l) => 24 + 1.4 * l, show: (v) => Math.floor(v) + ' m/s' },
+  { id: 'barbs', name: 'Barbed Tines', icon: '⋔', desc: 'Eggs the harpoon can carry. When full, better eggs replace your worst one', max: 12, base: 150, growth: 2.15, val: (l) => 3 + l, show: (v) => v + ' eggs' },
+  { id: 'steer', name: 'Rudder Fins', icon: '⇄', desc: 'How fast the harpoon snaps to your finger', max: 15, base: 80, growth: 1.7, val: (l) => 1 + 0.1 * l, show: (v) => v.toFixed(1) + 'x' },
   { id: 'winch', name: 'Bone Winch', icon: '⟲', desc: 'Reel speed + safe tension', max: 25, base: 70, growth: 1.6, val: (l) => l, show: (v) => 'Lv ' + v },
   { id: 'lantern', name: 'Corpse-Light Lantern', icon: '✺', desc: 'Hatch luck + light radius', max: 30, base: 200, growth: 1.75, val: (l) => 0.08 * l, show: (v) => '+' + Math.round(v * 100) + '% luck' },
   { id: 'sonar', name: 'Whisper Sonar', icon: '◎', desc: 'Reveals eggs below you', max: 10, base: 120, growth: 1.9, val: (l) => l, show: (v) => (v ? 40 + v * 30 + 'm scan' : 'None') },
@@ -126,11 +126,11 @@ export const UPG_BY_ID = Object.fromEntries(UPGRADES.map((u) => [u.id, u]));
 
 export const CREW = [
   { id: 'deckhand', name: 'Deckhand', color: '#c9a26b', base: 100, desc: '+4% reel speed each', room: 'winch' },
-  { id: 'gunner', name: 'Harpooner', color: '#d0503f', base: 150, desc: '+3% dive speed, +2% steer each', room: 'deck' },
-  { id: 'lookout', name: 'Lookout', color: '#4ba3c9', base: 200, desc: '+5% egg density each', room: 'nest' },
+  { id: 'gunner', name: 'Harpooner', color: '#d0503f', base: 150, desc: '+2% sink speed, +2% steering each', room: 'deck' },
+  { id: 'lookout', name: 'Lookout', color: '#4ba3c9', base: 200, desc: '+5% more eggs in the water each', room: 'nest' },
   { id: 'aquarist', name: 'Aquarist', color: '#4bc98b', base: 300, desc: '+4% aquarium income each', room: 'tank' },
-  { id: 'chaplain', name: 'Chaplain', color: '#e6e1d3', base: 350, desc: '+1% luck, calms Dread each', room: 'shrine' },
-  { id: 'occultist', name: 'Occultist', color: '#9b5cff', base: 400, desc: '+3% luck each, but feeds Dread', room: 'shrine' },
+  { id: 'chaplain', name: 'Chaplain', color: '#e6e1d3', base: 350, desc: '+1% luck each, and lowers Dread over time', room: 'shrine' },
+  { id: 'occultist', name: 'Occultist', color: '#9b5cff', base: 400, desc: '+3% luck each, but raises Dread over time', room: 'shrine' },
 ];
 export const CREW_BY_ID = Object.fromEntries(CREW.map((c) => [c.id, c]));
 
@@ -138,7 +138,7 @@ export const ROOMS = [
   { id: 'tank', name: 'Aquarium Tank', desc: '+4 aquarium slots' },
   { id: 'bunk', name: 'Crew Bunks', desc: '+4 crew beds' },
   { id: 'winch', name: 'Winch Room', desc: '+8% reel speed, +3% safe tension' },
-  { id: 'shrine', name: 'Lantern Shrine', desc: '+6% luck, calms Dread' },
+  { id: 'shrine', name: 'Lantern Shrine', desc: '+6% luck, lowers Dread over time' },
   { id: 'refinery', name: 'Ichor Refinery', desc: '+5% sell value' },
   { id: 'trophy', name: 'Trophy Hall', desc: '+3% aquarium income, shows your best catch' },
 ];

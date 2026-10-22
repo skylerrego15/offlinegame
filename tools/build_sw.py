@@ -6,7 +6,7 @@ for d in ['', 'css', 'js', 'assets/creatures', 'assets/eggs', 'assets/icons']:
     p = os.path.join(root, d)
     for f in sorted(os.listdir(p)):
         fp = os.path.join(p, f)
-        if os.path.isfile(fp) and not f.startswith('.') and f not in ('sw.js', 'README.md') and not f.endswith('.py'):
+        if os.path.isfile(fp) and not f.startswith('.') and f not in ('sw.js', 'README.md', 'DrownedClutch.html') and not f.endswith('.py'):
             rel = (d + '/' + f) if d else f
             files.append(rel)
             h.update(rel.encode()); h.update(open(fp, 'rb').read())

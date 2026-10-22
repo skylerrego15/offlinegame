@@ -25,7 +25,9 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 .pill.money b { font: 800 18px var(--serif); color: var(--gold); letter-spacing: .5px; display: block; line-height: 1; }
 .pill.money small { font-size: 10px; color: #9dff7a; display: block; margin-top: 2px; }
 .coin { color: var(--gold); font-size: 18px; }
-.pill.dread { margin-left: auto; }
+.pill.dread { margin-left: auto; pointer-events: auto; cursor: pointer; }
+.pill.dread::after { content: '?'; font: 700 10px system-ui; color: var(--mute); margin-left: -2px; }
+.mbox .dl { text-align: left; width: 100%; font-size: 13px; }
 .pill.dread .eye { color: #c9a; font-size: 15px; }
 .pill.dread b { font: 700 12px var(--serif); min-width: 18px; text-align: right; }
 .dbar { width: 62px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; }

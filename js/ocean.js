@@ -338,7 +338,7 @@ export function ensureChunks(f, depthTo) {
     if (y1 <= y0) continue;
     const z = zoneAt(y0);
     const span = (y1 - y0) / CHUNK;
-    const nE = Math.floor(4.3 * st.density * span + Math.random());
+    const nE = Math.floor(5.4 * st.density * span + Math.random());
     for (let i = 0; i < nE; i++) {
       f.eggs.push({
         x: rand(5, ww - 5), y: rand(y0, y1), tier: rollTier(z),

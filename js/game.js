@@ -121,12 +121,13 @@ export function fireHarpoon() {
   R.hp = {
     x: tx / PPM, y: ty / PPM, angle: R.aimAngle, phase: 'air',
     eggs: [], combo: 0, lastHitY: 0, base: st.range, maxDepth: Math.min(MAX_DEPTH - 1, st.range), shields: st.shields,
-    haulLuck: 0, slowT: 0, boostT: 0, trail: [], zone: 0, best: 0,
+    haulLuck: 0, slowT: 0, magnetT: 0, trail: [], zone: 0, best: 0, tx: null,
     tension: 0, taut: 0, lurkT: 2.5, entryX: tx / PPM, pearls: 0, ichor: 0, stolen: 0, snapped: 0,
   };
   S.stats.dives++;
   R.mode = 'dive';
   R.steer = 0;
+  R.steerX = null;
   sfxPlay('fire');
   shake(7);
   vibrate(40);
@@ -137,6 +138,39 @@ export function fireHarpoon() {
 
 function hpScreen() {
   return [R.hp.x * R.PPM, R.hp.y * R.PPM - R.camY];
+}
+
+// Put an egg on the harpoon. When the barbs are full, a better egg replaces the
+// worst one held; whichever egg is left over is rendered down into ichor (money).
+function stowEgg(tier, wx, wy, small = false) {
+  const hp = R.hp, st = stats();
+  const ex = wx * R.PPM, ey = wy * R.PPM;
+  const col = EGGS[tier - 1].color;
+  const ichorOf = (t) => EGGS[t - 1].ichor * (1 + hp.zone * 0.15) * st.sellMult;
+  if (hp.eggs.length < st.capacity) {
+    hp.eggs.push(tier);
+    hp.eggs.sort((a, b) => b - a);
+    floatText(ex, ey - 20, (small ? 'SNAGGED ' : '') + EGGS[tier - 1].name, col, small ? 13 : 15);
+    return;
+  }
+  let lo = 0;
+  for (let i = 1; i < hp.eggs.length; i++) if (hp.eggs[i] < hp.eggs[lo]) lo = i;
+  if (tier > hp.eggs[lo]) {
+    const old = hp.eggs[lo];
+    hp.eggs[lo] = tier;
+    hp.eggs.sort((a, b) => b - a);
+    const v = ichorOf(old);
+    addMoney(v); hp.ichor += v;
+    floatText(ex, ey - 24, `${EGGS[old - 1].name.replace(' Egg', '')} ➜ ${EGGS[tier - 1].name.replace(' Egg', '')}!`, col, 17);
+    floatText(ex, ey + 4, '+' + money(v) + ' ichor', '#9dff7a', 12);
+    ring(ex, ey, col, 70, 0.5);
+    sfxPlay('pickup');
+  } else {
+    const v = ichorOf(tier);
+    addMoney(v); hp.ichor += v;
+    floatText(ex, ey - 20, 'FULL · +' + money(v) + ' ichor', '#9dff7a', 14);
+    sfxPlay('ichor');
+  }
 }
 
 function takeEgg(e) {
@@ -153,19 +187,10 @@ function takeEgg(e) {
   ring(ex, ey, col, 50, 0.4);
   sfxPlay('hit', hp.combo);
   vibrate(15 + hp.combo * 5);
-  if (hp.eggs.length < st.capacity) {
-    hp.eggs.push(e.tier);
-    floatText(ex, ey - 20, EGGS[e.tier - 1].name, col, 15);
-  } else {
-    const v = EGGS[e.tier - 1].ichor * (1 + hp.zone * 0.15) * st.sellMult;
-    addMoney(v); hp.ichor += v;
-    floatText(ex, ey - 20, '+' + money(v) + ' ichor', '#9dff7a', 15);
-    sfxPlay('ichor');
-  }
+  stowEgg(e.tier, e.x, e.y);
   if (hp.combo >= 2) {
     const mult = hp.combo * hp.combo;
     hp.maxDepth = Math.min(MAX_DEPTH - 1, Math.max(hp.maxDepth, hp.base * mult));
-    hp.boostT = 0.6 + hp.combo * 0.12;
     hp.haulLuck += 0.05;
     const [sx, sy] = [ex, ey - R.camY];
     comboFX(hp.combo, sx, sy, `x${hp.combo} COMBO`, `RANGE x${mult} · ${meters(hp.maxDepth)}`);
@@ -215,21 +240,37 @@ export function updateDive(dt) {
     hp.y += Math.cos(hp.angle) * v * dt + 0;
     if (hp.y >= 0) {
       hp.phase = 'water';
+      hp.angle = 0;
       sfxPlay('splash');
       burst(hp.x * PPM, 0, 24, { color: '#cfefff', speed: 160, grav: 500, life: 0.7, glow: false, size: 2.5 });
       ring(hp.x * PPM, 0, '#cfefff', 50, 0.5);
     }
     return;
   }
-  hp.slowT -= dt; hp.boostT -= dt;
-  hp.angle += R.steer * 1.8 * st.steer * dt;
-  hp.angle = clamp(hp.angle, -1.25, 1.25);
-  const v = st.speed * (1 + hp.y / 350) * (hp.slowT > 0 ? 0.4 : 1) * (hp.boostT > 0 ? 1.7 : 1);
-  hp.x += Math.sin(hp.angle) * v * dt;
-  hp.y += Math.cos(hp.angle) * v * dt;
+  hp.slowT -= dt; hp.magnetT -= dt;
   const ww = worldW();
-  if (hp.x < 2) { hp.x = 2; hp.angle = Math.abs(hp.angle); }
-  if (hp.x > ww - 2) { hp.x = ww - 2; hp.angle = -Math.abs(hp.angle); }
+  // Direct steering: the harpoon chases your finger's x position. Constant dive speed.
+  const v = st.speed * (hp.slowT > 0 ? 0.45 : 1);
+  if (R.steerX != null) hp.tx = R.steerX;
+  else if (R.steer) hp.tx = (hp.tx ?? hp.x) + R.steer * 45 * dt;
+  const px = hp.x;
+  if (hp.tx != null) {
+    hp.tx = clamp(hp.tx, 2, ww - 2);
+    hp.x += (hp.tx - hp.x) * (1 - Math.exp(-st.steer * 9 * dt));
+  }
+  hp.x = clamp(hp.x, 2, ww - 2);
+  const lat = dt > 0 ? (hp.x - px) / dt : 0;
+  hp.angle = clamp(Math.atan2(lat, v) * 0.8, -0.7, 0.7);
+  hp.y += v * dt;
+  // aim assist: eggs just ahead of the spear drift into its path
+  const reach = hp.magnetT > 0 ? 16 : 6.5, pull = hp.magnetT > 0 ? 40 : 9;
+  for (const e of f.eggs) {
+    if (e.taken) continue;
+    const ahead = e.y - hp.y;
+    if (ahead < 0 || ahead > (hp.magnetT > 0 ? 24 : 12)) continue;
+    const dx = hp.x - e.x;
+    if (Math.abs(dx) < reach) { e.x += Math.sign(dx) * Math.min(Math.abs(dx), pull * dt); if (hp.magnetT > 0) e.y -= Math.min(ahead, 18 * dt); }
+  }
   hp.best = Math.max(hp.best, hp.y);
   S.stats.maxDepth = Math.max(S.stats.maxDepth, hp.y);
   ensureChunks(f, hp.y + 160);
@@ -242,7 +283,7 @@ export function updateDive(dt) {
   // eggs
   for (const e of f.eggs) {
     if (e.taken || Math.abs(e.y - hp.y) > 8) continue;
-    const rr = eggSize(e.tier) * 0.5 + 1.3;
+    const rr = eggSize(e.tier) * 0.55 + 2;
     if ((e.x - hp.x) ** 2 + (e.y - hp.y) ** 2 < rr * rr) takeEgg(e);
   }
   // pickups
@@ -264,8 +305,9 @@ export function updateDive(dt) {
       sfxPlay('pickup');
       burst(px, py, 14, { color: '#7dffb5', speed: 100 });
     } else {
-      hp.boostT = 1.3;
-      floatText(px, py - 16, 'SURGE!', '#bfefff', 16);
+      hp.magnetT = 2.5;
+      floatText(px, py - 16, 'EGG MAGNET!', '#bfefff', 16);
+      ring(px, py, '#bfefff', 120, 0.7);
       sfxPlay('splash');
     }
   }
@@ -366,13 +408,11 @@ export function updateReel(dt) {
   // snag drifting eggs on the way up
   for (const e of f.eggs) {
     if (e.taken || Math.abs(e.y - hp.y) > 6) continue;
-    if (hp.eggs.length >= st.capacity) break;
     const rr = eggSize(e.tier) * 0.5 + 1;
     if ((e.x - hp.x) ** 2 + (e.y - hp.y) ** 2 < rr * rr) {
       e.taken = true;
-      hp.eggs.push(e.tier);
       sfxPlay('hit', 1);
-      floatText(e.x * PPM, e.y * PPM - 16, 'SNAGGED ' + EGGS[e.tier - 1].name, EGGS[e.tier - 1].color, 13);
+      stowEgg(e.tier, e.x, e.y, true);
     }
   }
   // lurker

@@ -7,6 +7,7 @@ import {
 import { UPGRADES, CREW, ROOMS, CREATURES, CREATURE_BY_ID, RARITIES, MUTATIONS, MUT_BY_ID, EGGS, ZONES, OMEN_BY_ID, zoneAt, AQUA_RATE } from './data.js';
 import { creatureURL, eggURL } from './assets.js';
 import { CAGES, cageIcon, cageBonuses } from './cage.js';
+import { VERSION } from './version.js';
 import { money, fmt, meters, clamp } from './util.js';
 import {
   hatch, sellInst, keepInst, weakestFish, sellAquarium, buyUpgrade, hireCrew, buildRoom, startReel, toShip,
@@ -466,7 +467,8 @@ function pMenu() {
   const t = S.stats;
   h += `<div class="sect"><h4>Log</h4><div class="stats"><span>Dives</span><b>${t.dives}</b><span>Deepest</span><b>${meters(t.maxDepth)}</b><span>Best combo</span><b>x${t.maxCombo}</b><span>Eggs hauled</span><b>${t.eggs}</b><span>Creatures hatched</span><b>${t.hatched}</b><span>Best creature</span><b>${money(t.bestValue)}</b><span>Lifetime earned</span><b>${money(S.lifetime)}</b><span>Offerings</span><b>${t.offerings}</b></div></div>`;
   h += `<div class="sect"><h4>Install</h4><p class="note">iPhone: Share → <b>Add to Home Screen</b>. After the first load the game plays fully offline.</p>
-  <button class="btn ghost" data-act="wipe">erase save</button></div>`;
+  <button class="btn ghost" data-act="update">force update</button> <button class="btn ghost" data-act="wipe">erase save</button>
+  <p class="note">version ${VERSION}</p></div>`;
   return h;
 }
 
@@ -493,6 +495,16 @@ function onSheetClick(e) {
           sfxPlay('reveal', 7); toast(`The deep accepts. +✦${g} Abyssal Sigils`, '#c79bff');
         } else if (ev.target === E.modal || ev.target.closest('[data-close]')) E.modal.classList.add('hidden');
       };
+      return;
+    case 'update':
+      save();
+      toast('Updating…', '#9fd8c9');
+      Promise.resolve()
+        .then(() => (navigator.serviceWorker ? navigator.serviceWorker.getRegistrations() : []))
+        .then((rs) => Promise.all(rs.map((r) => r.unregister())))
+        .then(() => (window.caches ? caches.keys().then((ks) => Promise.all(ks.map((k) => caches.delete(k)))) : 0))
+        .catch(() => {})
+        .then(() => location.reload());
       return;
     case 'wipe':
       E.modal.innerHTML = `<div class="mbox"><h3>Erase everything?</h3><p>This cannot be undone.</p><button class="btn danger" data-yes>ERASE</button><button class="btn ghost" data-close>cancel</button></div>`;

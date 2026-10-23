@@ -237,22 +237,109 @@ function drawEggAt(c, x, y, size, opt = {}) {
   c.save(); c.translate(sx, sy); c.rotate(rot); c.globalAlpha = opt.alpha ?? 1;
   c.drawImage(im, -w / 2, -h / 2, w, h);
   const cr = opt.crack || 0;
-  if (cr > 0) {
-    const rnd = seeded(RV.seed);
-    c.strokeStyle = opt.crackCol || '#fff8e0'; c.lineWidth = 2; c.shadowColor = opt.crackCol || '#fff'; c.shadowBlur = 8;
-    const n = Math.ceil(cr * 7);
-    for (let i = 0; i < n; i++) {
-      let px = (rnd() - 0.5) * w * 0.3, py = (rnd() - 0.5) * h * 0.3;
-      c.beginPath(); c.moveTo(px, py);
-      const a = rnd() * TAU;
-      const len = (0.25 + rnd() * 0.25) * h * Math.min(1, cr * 1.5);
-      for (let s = 0; s < 4; s++) { px += Math.cos(a + (rnd() - 0.5) * 1.6) * len / 4; py += Math.sin(a + (rnd() - 0.5) * 1.6) * len / 4; c.lineTo(px, py); }
-      c.stroke();
-    }
-    c.shadowBlur = 0;
-  }
+  if (cr > 0) drawCracks(c, im, w, h, cr, opt.crackCol || opt.glow || '#fff4d6');
   c.restore();
   c.globalAlpha = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Shell fractures: one impact point, jagged tapering fractures that branch and
+// spread across the shell, clipped to the egg's silhouette, with light leaking
+// through. Generated once per reveal and grown along their length.
+// ---------------------------------------------------------------------------
+let crackNet = null, crackCv = null;
+function buildCracks(seed) {
+  const rnd = seeded(seed * 7 + 3);
+  const ix = (rnd() - 0.5) * 0.2, iy = 0.02 + rnd() * 0.12; // impact, egg-normalized (-0.5..0.5)
+  const paths = [];
+  const walk = (x, y, ang, len, width, start, depth) => {
+    const pts = [[x, y]];
+    let dist = 0, a = ang;
+    const step = 0.028 + rnd() * 0.012;
+    while (dist < len) {
+      a += (rnd() - 0.5) * 0.9;
+      const sl = step * (0.6 + rnd() * 0.8);
+      x += Math.cos(a) * sl; y += Math.sin(a) * sl * 1.15;
+      dist += sl;
+      pts.push([x, y]);
+      if (depth < 2 && rnd() < 0.16 && dist > 0.05) {
+        walk(x, y, a + (rnd() < 0.5 ? -1 : 1) * (0.5 + rnd() * 0.7), len * (0.25 + rnd() * 0.3), width * 0.55, start + dist, depth + 1);
+      }
+      if (Math.abs(x) > 0.62 || Math.abs(y) > 0.62) break;
+    }
+    paths.push({ pts, width, start, len: dist });
+  };
+  const n = 4 + Math.floor(rnd() * 3);
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + (rnd() - 0.5) * 0.7;
+    walk(ix, iy, a, 0.35 + rnd() * 0.4, 1, 0, 0);
+  }
+  // short crushed ring around the impact
+  const ring = [];
+  const rr = 0.045 + rnd() * 0.02;
+  for (let k = 0; k <= 9; k++) { const a = (k / 9) * Math.PI * 2; ring.push([ix + Math.cos(a) * rr * (0.8 + rnd() * 0.4), iy + Math.sin(a) * rr * (0.8 + rnd() * 0.4)]); }
+  paths.push({ pts: ring, width: 0.6, start: 0.04, len: 0.3 });
+  let total = 0;
+  for (const p of paths) total = Math.max(total, p.start + p.len);
+  return { seed, paths, total, ix, iy };
+}
+function strokeGrown(g, p, reach, scaleX, scaleY, wBase, taper) {
+  let d = p.start;
+  for (let i = 1; i < p.pts.length; i++) {
+    const [ax, ay] = p.pts[i - 1], [bx, by] = p.pts[i];
+    const sl = Math.hypot(bx - ax, by - ay);
+    if (d >= reach) return;
+    const f = Math.min(1, (reach - d) / sl);
+    const t = (d - p.start) / Math.max(0.001, p.len);
+    g.lineWidth = Math.max(0.5, wBase * p.width * (taper ? 1 - t * 0.75 : 1));
+    g.beginPath();
+    g.moveTo((ax + 0.5) * scaleX, (ay + 0.5) * scaleY);
+    g.lineTo((ax + (bx - ax) * f + 0.5) * scaleX, (ay + (by - ay) * f + 0.5) * scaleY);
+    g.stroke();
+    d += sl;
+  }
+}
+function drawCracks(c, im, w, h, cr, lightCol) {
+  if (!crackNet || crackNet.seed !== RV.seed) crackNet = buildCracks(RV.seed);
+  const dpr = Math.min(2, R.dpr || 1);
+  const cw = Math.ceil(w * dpr), ch = Math.ceil(h * dpr);
+  if (!crackCv) crackCv = document.createElement('canvas');
+  if (crackCv.width !== cw || crackCv.height !== ch) { crackCv.width = cw; crackCv.height = ch; }
+  const g = crackCv.getContext('2d');
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, cw, ch);
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  const reach = ease.outCubic(Math.min(1, cr)) * crackNet.total;
+  const base = Math.max(1.4, h * dpr * 0.02) * (0.7 + Math.min(1, cr) * 0.7);
+  // fractures live on the shell body, not on horns/flames/crystals sticking out of it
+  g.save();
+  g.beginPath(); g.ellipse(cw * 0.5, ch * 0.6, cw * 0.42, ch * 0.37, 0, 0, Math.PI * 2); g.clip();
+  // 1. light bleeding out of the fractures
+  g.globalCompositeOperation = 'source-over';
+  g.strokeStyle = rgba(lightCol, 0.16 + 0.22 * cr);
+  for (const p of crackNet.paths) strokeGrown(g, p, reach, cw, ch, base * 2.6, true);
+  // 2. the dark fracture itself
+  g.strokeStyle = 'rgba(16,8,6,0.92)';
+  for (const p of crackNet.paths) strokeGrown(g, p, reach, cw, ch, base * 1.2, true);
+  // 3. hot core of light deep in the crack
+  g.strokeStyle = rgba(lightCol, 0.95);
+  for (const p of crackNet.paths) strokeGrown(g, p, reach, cw, ch, base * 0.42, true);
+  // 4. raised shell edge catching light (bevel)
+  g.save(); g.translate(-dpr * 0.8, -dpr * 0.8);
+  g.strokeStyle = 'rgba(255,255,255,0.35)';
+  for (const p of crackNet.paths) strokeGrown(g, p, reach, cw, ch, base * 0.35, true);
+  g.restore();
+  // 5. glow pooling at the impact point
+  const gx = (crackNet.ix + 0.5) * cw, gy = (crackNet.iy + 0.5) * ch;
+  const gr = g.createRadialGradient(gx, gy, 0, gx, gy, ch * (0.12 + cr * 0.25));
+  gr.addColorStop(0, rgba(lightCol, 0.45 * cr)); gr.addColorStop(1, rgba(lightCol, 0));
+  g.fillStyle = gr; g.fillRect(0, 0, cw, ch);
+  g.restore();
+  // keep everything inside the shell's silhouette
+  g.globalCompositeOperation = 'destination-in';
+  g.drawImage(im, 0, 0, cw, ch);
+  g.globalCompositeOperation = 'source-over';
+  c.drawImage(crackCv, -w / 2, -h / 2, w, h);
 }
 
 function rays(c, x, y, col, a, n = 14, spin = 0.3, w = 0.08) {
@@ -582,7 +669,7 @@ A[23] = (c, k, cx, cy) => {
   const vy = cy + R.H * 0.6;
   for (let i = 0; i < 3; i++) if (Math.random() < 0.3 + k) spark(cx + rand(-14, 14) * (1 + k), vy - rand(0, 30), { kind: 'ember', color: Math.random() < 0.3 ? '#ffe2a0' : '#ff7a1a', vx: rand(-40, 40), vy: rand(-420, -220) * (0.7 + k), size: rand(1, 2.4), life: rand(0.8, 1.6), drag: 0.4 });
   if (k > 0.3) fire('rum', () => sfxPlay('tentacle'));
-  drawEggAt(c, cx, cy, E(), { glow: k < 0.5 ? '#ff7a1a' : climbColor(k), glowA: 0.4 + k * 0.6, shake: 1 + k * 6, crack: seg(k, 0.5, 1), crackCol: '#ffcf80' });
+  drawEggAt(c, cx, cy, E(), { glow: k < 0.5 ? '#ff7a1a' : climbColor(k), glowA: 0.4 + k * 0.6, shake: 1 + k * 6, crack: seg(k, 0.5, 1), crackCol: '#ff9a3c' });
 };
 // 24 Bioluminescent Swarm
 A[24] = (c, k, cx, cy) => {

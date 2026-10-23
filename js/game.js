@@ -9,6 +9,7 @@ import { layoutShip, cannonTip } from './ship.js';
 import { burst, ring, spark, floatText, shake, flash, comboFX, stop, clearFx } from './fx.js';
 import { sfxPlay, vibrate, setAmbience } from './audio.js';
 import { clamp, rand, pick, weighted, gauss, fmt, money, meters, lerp } from './util.js';
+const MAX_SINK = 600; // m/s: past this the screen can't show what's coming
 import { UI } from './ui-bridge.js';
 import { CAGES } from './cage.js';
 
@@ -224,7 +225,7 @@ export function fireHarpoon() {
   R.hp = {
     x: tx / PPM, y: ty / PPM, angle: R.aimAngle, phase: 'air',
     eggs: [], combo: 0, lastHitY: 0, base: st.range, maxDepth: Math.min(MAX_DEPTH - 1, st.range), shields: st.shields,
-    haulLuck: 0, slowT: 0, magnetT: 0, trail: [], zone: 0, best: 0, tx: null,
+    haulLuck: 0, slowT: 0, magnetT: 0, spd: 1, trail: [], zone: 0, best: 0, tx: null,
     tension: 0, taut: 0, lurkT: 2.5, entryX: tx / PPM, pearls: 0, ichor: 0, stolen: 0, snapped: 0,
   };
   S.stats.dives++;
@@ -249,7 +250,7 @@ function stowEgg(tier, wx, wy) {
   hp.eggs.push(tier);
   hp.squash = 1;
   UI.eggFly(wx * R.PPM, wy * R.PPM - R.camY, tier);
-  floatText(wx * R.PPM, wy * R.PPM - 26, EGGS[tier - 1].name, EGGS[tier - 1].color, 15);
+  if (hp.combo < 2 || tier >= 4) floatText(wx * R.PPM, wy * R.PPM - 26, EGGS[tier - 1].name, EGGS[tier - 1].color, 14);
 }
 
 function takeEgg(e) {
@@ -262,8 +263,8 @@ function takeEgg(e) {
   const PPM = R.PPM;
   const ex = e.x * PPM, ey = e.y * PPM;
   const col = EGGS[e.tier - 1].color;
-  burst(ex, ey, 18, { color: col, speed: 180, life: 0.6 });
-  ring(ex, ey, col, 50, 0.4);
+  burst(ex, ey, 12, { color: col, speed: 170, life: 0.5, size: 1.6 });
+  ring(ex, ey, col, 46, 0.35);
   sfxPlay('hit', hp.combo);
   vibrate(15 + hp.combo * 5);
   stowEgg(e.tier, e.x, e.y);
@@ -271,8 +272,9 @@ function takeEgg(e) {
     const mult = hp.combo * hp.combo;
     hp.maxDepth = Math.min(MAX_DEPTH - 1, Math.max(hp.maxDepth, hp.base * mult));
     hp.haulLuck += 0.05;
+    hp.spd *= 2; // every combo hit doubles the current dive speed
     const [sx, sy] = [ex, ey - R.camY];
-    comboFX(hp.combo, sx, sy, `x${hp.combo} COMBO`, `RANGE x${mult} · ${meters(hp.maxDepth)}`);
+    comboFX(hp.combo, sx, sy, `x${hp.combo} COMBO`, `RANGE x${mult}`, `SPEED x${fmt(hp.spd)}`);
     sfxPlay('combo', hp.combo);
   } else {
     stop(0.03);
@@ -310,6 +312,19 @@ export function startReel(reason) {
 }
 
 export function updateDive(dt) {
+  const hp = R.hp;
+  if (!hp) return;
+  if (hp.phase === 'air') return diveStep(dt);
+  // fast dives are integrated in small steps so eggs and hazards can't be skipped
+  const v = Math.min(MAX_SINK, stats().speed * (hp.spd || 1));
+  const n = Math.min(60, Math.max(1, Math.ceil((v * dt) / 2.5)));
+  for (let i = 0; i < n; i++) {
+    if (R.mode !== 'dive' || R.hp !== hp) return;
+    diveStep(dt / n);
+  }
+}
+
+function diveStep(dt) {
   const hp = R.hp, st = stats(), PPM = R.PPM, f = R.field;
   hp.trail.push([hp.x, hp.y]);
   if (hp.trail.length > 120) hp.trail.shift();
@@ -330,7 +345,7 @@ export function updateDive(dt) {
   hp.squash = (hp.squash || 0) * Math.exp(-dt * 7);
   const ww = worldW();
   // Direct steering: the harpoon chases your finger's x position. Constant dive speed.
-  const v = st.speed * (hp.slowT > 0 ? 0.45 : 1);
+  const v = Math.min(MAX_SINK, st.speed * (hp.spd || 1)) * (hp.slowT > 0 ? 0.45 : 1);
   if (R.steerX != null) hp.tx = R.steerX;
   else if (R.steer) hp.tx = (hp.tx ?? hp.x) + R.steer * 45 * dt;
   const px = hp.x;
@@ -343,7 +358,8 @@ export function updateDive(dt) {
   hp.angle = clamp(Math.atan2(lat, v) * 0.8, -0.7, 0.7);
   hp.y += v * dt;
   // aim assist: eggs just ahead of the spear drift into its path
-  const reach = hp.magnetT > 0 ? 16 : 6.5, pull = hp.magnetT > 0 ? 40 : 9;
+  // aim assist only at cruising speed: once a combo has you boosted, it's all on you
+  const reach = hp.magnetT > 0 ? 16 : (hp.spd || 1) > 1 ? 0 : 6.5, pull = hp.magnetT > 0 ? 40 : 9;
   for (const e of f.eggs) {
     if (e.taken) continue;
     const ahead = e.y - hp.y;
@@ -355,8 +371,9 @@ export function updateDive(dt) {
   S.stats.maxDepth = Math.max(S.stats.maxDepth, hp.y);
   ensureChunks(f, hp.y + 160);
   if (hp.combo > 0 && hp.y - hp.lastHitY > COMBO_WINDOW) {
-    if (hp.combo >= 2) { floatText(hp.x * PPM, hp.y * PPM - 24, 'COMBO BROKEN', '#9fb3b0', 15); sfxPlay('jelly'); }
+    if (hp.combo >= 2) { floatText(hp.x * PPM, hp.y * PPM - 24, 'COMBO BROKEN · SPEED RESET', '#9fb3b0', 14); sfxPlay('jelly'); }
     hp.combo = 0;
+    hp.spd = 1;
   }
   // bubbles
   if (Math.random() < 0.5) spark(hp.x * PPM, hp.y * PPM, { vx: rand(-20, 20), vy: rand(-80, -30), color: 'rgba(200,240,255,0.6)', size: rand(1, 2.5), life: 0.8, glow: false, drag: 1 });

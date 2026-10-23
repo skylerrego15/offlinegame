@@ -25,6 +25,33 @@ float HP(){ return uH>0. ? exp(-uH*2.4)*(1.-exp(-uH*30.))*1.6+.18 : 0.; }
 `;
 
 const FX = {
+  // ---- combo hit: emission-only layer (composited additively over the dive)
+  combo: `void main(){ vec2 p=P(); float age=uK; float L=uH; float t=uT;
+    float r=length(p); float a=atan(p.y,p.x);
+    vec3 col=vec3(0.);
+    float core=exp(-r*r*1100.)*exp(-age*9.)*1.6+exp(-r*16.)*exp(-age*5.5)*.35;
+    col+=mix(uCol,vec3(1.),.6)*core;
+    float sk=min(L,10.);
+    float streak=exp(-abs(p.y)*(150.-sk*7.))*exp(-abs(p.x)*(3.6-sk*.18))*exp(-age*4.2)*(.28+sk*.035);
+    col+=mix(vec3(.6,.85,1.),uCol,.45)*streak;
+    for(int i=0;i<3;i++){ float fi=float(i);
+      if(fi>floor(sk/4.)) break;
+      float ag=age-fi*.085;
+      if(ag<0.) continue;
+      float R=(1.-exp(-ag*5.))*(.2+sk*.022+fi*.06);
+      float n=(noise(vec2(a*6.+fi*3.,t*2.))-.5)*.02*(1.+fi);
+      float d=r-R+n;
+      float w=.005+ag*.022;
+      float ring=exp(-d*d/(w*w))*exp(-ag*3.4);
+      col+=mix(vec3(1.),uCol,.35+fi*.2)*ring*(.85-fi*.22);
+      col+=uCol*smoothstep(R,R*.55,r)*exp(-ag*5.)*.05;
+    }
+    float fil=pow(noise(vec2(a*9.,r*14.-age*10.)),7.)*exp(-r*6.)*smoothstep(3.,5.,sk)*exp(-age*3.)*3.;
+    col+=mix(uCol,vec3(1.,.95,.9),.3)*fil;
+    vec2 uv=UV(); float edge=pow(max(abs(uv.x-.5),abs(uv.y-.5))*2.,4.);
+    col+=uCol*edge*smoothstep(5.,9.,sk)*exp(-age*2.5)*.22;
+    gl_FragColor=vec4(col,1.); }`,
+
   // ---- deep water volume: haze, light shafts, drifting particulate
   deep: `void main(){ vec2 p=P(); vec2 uv=UV(); float t=uT;
     vec3 col=bg(uv)*.12*vec3(.6,.8,1.)+mix(vec3(0.,.005,.012),vec3(0.,.04,.07),uv.y);

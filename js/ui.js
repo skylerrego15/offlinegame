@@ -168,7 +168,7 @@ export function updateUI(dt) {
     E.shieldV.textContent = hp.shields ? '⛨'.repeat(hp.shields) : '';
     if (R.mode === 'dive' && hp.combo > 0) {
       const left = clamp(COMBO_WINDOW - (hp.y - hp.lastHitY), 0, COMBO_WINDOW);
-      E.comboV.innerHTML = `CHAIN x${hp.combo} · next egg within ${Math.ceil(left)}m<i><b style="width:${(left / COMBO_WINDOW) * 100}%"></b></i>`;
+      E.comboV.innerHTML = `CHAIN x${hp.combo}${hp.spd > 1 ? ` · SPEED x${fmt(hp.spd)}` : ''} · next egg within ${Math.ceil(left)}m<i><b style="width:${(left / COMBO_WINDOW) * 100}%"></b></i>`;
     } else E.comboV.textContent = '';
     E.luckV.textContent = hp.haulLuck > 0.001 ? '+' + Math.round(hp.haulLuck * 100) + '% haul luck' : '';
     if (R.mode === 'reel') {

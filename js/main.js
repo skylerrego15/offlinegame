@@ -43,7 +43,7 @@ function updateCamera(dt) {
   if ((R.mode === 'dive' || R.mode === 'reel') && hp) {
     target = hp.y * PPM - R.H * (R.mode === 'reel' ? 0.55 : 0.33);
     if (hp.phase === 'air') target = Math.min(target, sh.mastTop - 70);
-    k = R.mode === 'dive' ? 9 : 7;
+    k = R.mode === 'dive' ? 9 * Math.max(1, hp.spd || 1) : 7;
   } else {
     const maxPan = Math.max(0, sh.bottom + 260 - (sh.mastTop - 70) - R.H * 0.6);
     R.shipPan = clamp(R.shipPan, -40, maxPan);

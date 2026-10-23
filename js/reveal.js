@@ -235,6 +235,7 @@ function drawEggAt(c, x, y, size, opt = {}) {
     c.fillStyle = g; c.beginPath(); c.arc(sx, sy, h * 1.5, 0, TAU); c.fill();
   }
   c.save(); c.translate(sx, sy); c.rotate(rot); c.globalAlpha = opt.alpha ?? 1;
+  if (opt.sqx || opt.sqy) c.scale(opt.sqx || 1, opt.sqy || 1);
   c.drawImage(im, -w / 2, -h / 2, w, h);
   const cr = opt.crack || 0;
   if (cr > 0) drawCracks(c, im, w, h, cr, opt.crackCol || opt.glow || '#fff4d6');
@@ -477,28 +478,126 @@ A[9] = (c, k, cx, cy) => {
   c.restore();
   drawEggAt(c, cx, cy, E(), { glow: climbColor(w), glowA: 0.3 + w, shake: w * 3, crack: seg(w, 0.5, 1) });
 };
-// 11 The Grasp
-A[11] = (c, k, cx, cy) => {
-  const w = seg(k, 0, 1);
-  drawEggAt(c, cx, cy, E(), { glow: climbColor(w), shake: seg(w, 0.6, 1) * 8, crack: seg(w, 0.6, 1), scale: 1 - seg(w, 0.7, 1) * 0.1 });
-  const reach = ease.outCubic(seg(w, 0, 0.7));
-  c.lineCap = 'round';
-  for (let i = 0; i < 6; i++) {
-    const side = i % 2 ? 1 : -1;
-    const x0 = cx + side * (R.W * 0.6), y0 = cy + 140 + (i >> 1) * 40;
-    const tx = cx + side * 20, ty = cy - 30 + (i >> 1) * 30;
-    for (let pass = 0; pass < 2; pass++) {
-      c.strokeStyle = pass ? '#6b2a4a' : '#12050c';
-      c.beginPath(); c.moveTo(x0, y0);
-      for (let s = 1; s <= 14; s++) {
-        const f = (s / 14) * reach;
-        c.lineWidth = (pass ? 10 : 15) * (1 - f * 0.8);
-        c.lineTo(lerp(x0, tx, f) + Math.sin(f * 8 + R.t * 4 + i) * 16 * (1 - f), lerp(y0, ty, f) - Math.sin(f * Math.PI) * 60);
-      }
-      c.stroke();
+// 11 The Grasp — tentacles rise out of the dark, coil round the shell (behind and in front of it) and squeeze
+function tubeSeg(c, a, b, w) {
+  c.lineWidth = w;
+  c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke();
+}
+function drawTentacle(c, pts, front, egg) {
+  // pts: [x, y, width, depth]; depth < 0 = behind the egg
+  const on = (i) => (pts[i][3] >= 0) === front;
+  const nrm = (i) => {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+    const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1;
+    let nx = -dy / l, ny = dx / l;
+    // underside = the side facing the egg
+    if ((egg[0] - pts[i][0]) * nx + (egg[1] - pts[i][1]) * ny < 0) { nx = -nx; ny = -ny; }
+    return [nx, ny];
+  };
+  c.save();
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  const dim = front ? 1 : 0.42;
+  const col = (r, g, b, a = 1) => `rgba(${(r * dim) | 0},${(g * dim) | 0},${(b * dim) | 0},${a})`;
+  const pass = (style, wf, off, minW = 0.6) => {
+    c.strokeStyle = style;
+    for (let i = 1; i < pts.length; i++) {
+      if (!on(i)) continue;
+      const w = pts[i][2];
+      if (off) {
+        const [nx, ny] = nrm(i), o = off * w;
+        tubeSeg(c, [pts[i - 1][0] + nx * o, pts[i - 1][1] + ny * o], [pts[i][0] + nx * o, pts[i][1] + ny * o], Math.max(minW, w * wf));
+      } else tubeSeg(c, pts[i - 1], pts[i], Math.max(minW, w * wf));
+    }
+  };
+  // round, wet tube: dark rim -> body -> lit core -> specular, lit from above the egg
+  c.strokeStyle = '#050104';
+  for (let i = 1; i < pts.length; i++) if (on(i)) tubeSeg(c, pts[i - 1], pts[i], pts[i][2] + 2);
+  pass(col(48, 16, 36), 1, 0);
+  pass(col(84, 30, 64), 0.74, -0.08);
+  pass(col(122, 52, 92), 0.46, -0.16);
+  pass(col(168, 92, 132, 0.8), 0.22, -0.26);
+  pass(front ? 'rgba(255,225,240,0.55)' : 'rgba(255,225,240,0.12)', 0.07, -0.32);
+  // pale belly along the side facing the egg
+  pass(col(150, 96, 120, 0.55), 0.18, 0.36);
+  // two rows of suckers along the underside
+  if (front) {
+    for (let i = 2; i < pts.length - 1; i += 2) {
+      if (!on(i)) continue;
+      const [x, y, w] = pts[i];
+      const r = w * 0.2;
+      if (r < 1) continue;
+      const [nx, ny] = nrm(i);
+      const sx = x + nx * w * 0.4, sy = y + ny * w * 0.4;
+      const ang = Math.atan2(ny, nx);
+      c.fillStyle = 'rgba(214,160,182,0.9)'; c.beginPath(); c.ellipse(sx, sy, r * 0.75, r * 1.1, ang, 0, TAU); c.fill();
+      c.fillStyle = 'rgba(60,16,38,0.9)'; c.beginPath(); c.ellipse(sx + nx * r * 0.15, sy + ny * r * 0.15, r * 0.35, r * 0.6, ang, 0, TAU); c.fill();
     }
   }
-  if (w > 0.75 && Math.random() < 0.4) sfxPlay('crack');
+  c.restore();
+}
+A[11] = (c, k, cx, cy) => {
+  const w0 = seg(k, 0, 1);
+  if (w0 > 0.05) fire('gr1', () => sfxPlay('tentacle'));
+  if (w0 > 0.62) fire('gr2', () => { sfxPlay('growl'); shake(5); });
+  const im = IMG.eggs[RV.item.tier];
+  const H = E() * 1.15, Wd = im ? (H * im.naturalWidth) / im.naturalHeight : H * 0.8;
+  const bx = cx, by = cy + H * 0.1, rx = Wd * 0.42, ry = H * 0.4;
+  const reach = ease.outCubic(seg(w0, 0, 0.42));
+  const wrapK = ease.inOut(seg(w0, 0.28, 0.78));
+  const grip = ease.inOut(seg(w0, 0.6, 1));
+  const sc = H / 140;
+  const specs = [
+    { yb: -0.32, sx: -0.12, sy: 1.0, turns: 1.55 },
+    { yb: 0.12, sx: 1.12, sy: 0.92, turns: 1.4 },
+    { yb: 0.55, sx: 0.32, sy: 1.12, turns: 1.3 },
+  ];
+  const tents = specs.map((sp, i) => {
+    const side = sp.sx < 0.5 ? -1 : 1;
+    const ringR = rx * Math.sqrt(Math.max(0.08, 1 - sp.yb * sp.yb)) * (1.1 - 0.1 * grip);
+    const ringY = by + sp.yb * ry;
+    const tilt = ringR * 0.36;
+    const th0 = side > 0 ? 0 : Math.PI;
+    const dir = side > 0 ? -1 : 1;
+    const x0 = sp.sx * R.W, y0 = cy + sp.sy * R.H * 0.5;
+    const ex = bx + ringR * Math.cos(th0), ey = ringY;
+    const pts = [];
+    const nA = 22;
+    for (let s = 0; s <= nA; s++) {
+      const f = (s / nA) * reach;
+      const p1x = x0 - side * 70 * sc, p1y = lerp(y0, ey, 0.45);
+      const p2x = ex + side * 110 * sc, p2y = ey + 70 * sc;
+      const q = 1 - f;
+      const x = q * q * q * x0 + 3 * q * q * f * p1x + 3 * q * f * f * p2x + f * f * f * ex;
+      const y = q * q * q * y0 + 3 * q * q * f * p1y + 3 * q * f * f * p2y + f * f * f * ey;
+      const wave = Math.sin(f * 9 + R.t * 3 + i * 1.7) * 12 * sc * Math.sin(f * Math.PI) * (1 - grip * 0.8);
+      pts.push([x + wave, y + wave * 0.4, 0, 1]);
+    }
+    if (reach >= 0.999) {
+      const wrapAmt = Math.PI * sp.turns * wrapK, nW = 34;
+      for (let s = 1; s <= nW && wrapAmt > 0.01; s++) {
+        const ang = (s / nW) * wrapAmt;
+        const th = th0 + dir * ang;
+        const z = ang < Math.PI ? -Math.sin(ang) - 0.0001 : Math.sin(ang - Math.PI) + 0.0001;
+        const lift = ang < Math.PI ? -Math.sin(ang) : Math.sin(ang - Math.PI);
+        pts.push([bx + ringR * Math.cos(th), ringY + tilt * lift - (ang / Math.PI) * 6 * sc, 0, z]);
+      }
+    }
+    const n = pts.length, nA1 = nA + 1, nWr = Math.max(1, n - nA1);
+    for (let s = 0; s < n; s++) {
+      const w = s < nA1 ? lerp(28, 19, s / nA) : lerp(19, 5, Math.pow((s - nA1) / Math.max(1, 34 - 1), 1.2));
+      pts[s][2] = w * sc * (1 + grip * 0.1);
+    }
+    return pts;
+  });
+  for (const t of tents) drawTentacle(c, t, false, [bx, by]);
+  drawEggAt(c, cx, cy, H, { glow: climbColor(w0), glowA: 0.35 + w0 * 0.4, shake: grip * 5, crack: seg(w0, 0.62, 1), sqx: 1 - 0.07 * grip, sqy: 1 + 0.03 * grip });
+  // contact shadow where the coils press into the shell
+  c.save();
+  c.strokeStyle = 'rgba(0,0,0,0.32)'; c.lineCap = 'round';
+  for (const t of tents) for (let i = 1; i < t.length; i++) if (t[i][3] >= 0 && t[i][3] < 0.999) tubeSeg(c, [t[i - 1][0], t[i - 1][1] + 3], [t[i][0], t[i][1] + 3], t[i][2] * 1.3);
+  c.restore();
+  for (const t of tents) drawTentacle(c, t, true, [bx, by]);
+  if (grip > 0.3 && Math.random() < 0.12) sfxPlay('crack');
 };
 // 12 Blood Moon
 A[12] = (c, k, cx, cy) => {
